@@ -26,6 +26,7 @@ Method (v2, learned from the CN Nov 2026 paper; see README.md)
 """
 import argparse, json, math, os, random, re, statistics, sys, datetime   # standard library only
 
+SKIPPED = []          # papers left out by load() because their drafted questions look garbled
 LAMBDA = 0.7          # recency decay per paper
 SIM_THRESHOLD = 0.55  # average cosine similarity for two clusters to be the same question
 L2 = 0.05
@@ -88,11 +89,20 @@ demonstrate mention justify proper appropriate necessary various different worki
 
 # ------------------------------------------------------------------ data + families
 def load(d):
-    cfg = json.load(open(os.path.join(d, "subject.json")))
-    topics = json.load(open(os.path.join(d, "topics.json")))["topics"]
+    cfg = json.load(open(os.path.join(d, "subject.json"), encoding="utf-8"))
+    topics = json.load(open(os.path.join(d, "topics.json"), encoding="utf-8"))["topics"]
     pp = os.path.join(d, "papers.json")
-    papers = json.load(open(pp))["papers"] if os.path.exists(pp) else []
+    papers = json.load(open(pp, encoding="utf-8"))["papers"] if os.path.exists(pp) else []
     papers = [p for p in papers if p.get("questions") and not p.get("duplicate_of")]   # skip empty / duplicate papers
+    SKIPPED.clear()
+    keep = []
+    for p in papers:     # a draft that failed the marks check AND looks garbled would only add noise
+        nA = sum(1 for q in p["questions"] if q["q"].startswith("A"))
+        if str(p.get("extract_status", "ok")).startswith("review") and (len(p["questions"]) < 12 or nA < 4):
+            SKIPPED.append(f"{p['label']} ({len(p['questions'])} questions, {nA} in Part A)")
+        else:
+            keep.append(p)
+    papers = keep
     for p in papers:
         p.setdefault("course", cfg["old_codes"][0] if cfg.get("old_codes") else cfg["code"])
     untagged = [f"{p['id']} {q['q']}" for p in papers for q in p["questions"] if not q.get("topics")]
@@ -504,6 +514,22 @@ def main():
             warnings.append(f"Module {m}: topic probabilities are nearly equal, so the order within it is weak.")
     if not any(m["module"] for m in topics.values()):
         warnings.append("No topics.")
+    if not papers:
+        warnings.append("No past papers with questions: the order reflects only the topic list's own priorities.")
+    elif len(papers) < 3:
+        warnings.append(f"Only {len(papers)} past papers with questions: the history part of the forecast is weak.")
+    if SKIPPED:
+        warnings.append("Left out because their drafted questions look garbled (fix them in papers.json): " + "; ".join(SKIPPED))
+    if bt_curve and all(bt_curve[k]["mean"] <= bt_curve[k]["random"] + 0.02 for k in ("40%", "60%")):
+        warnings.append("On past papers, the history model did no better than random topic choice. Treat this ranking as "
+                        "weak and cover every module evenly.")
+    if fam_out and sum(1 for x in fam_out if x["times"] > 1) == 0:
+        warnings.append("No question repeated between the past papers used, so the likely-question list is only a guess.")
+    tj = os.path.join(D, "topics.json")
+    built_without = set(json.load(open(tj, encoding="utf-8")).get("_split_built_without", [])) if os.path.exists(tj) else set()
+    split_used = any(t.get("parent") for t in topics.values())
+    for h in holdouts:
+        h["optimistic"] = split_used and not any(p["label"] == h["paper"] and p["id"] in built_without for p in papers)
     out = {"generated": datetime.date.today().isoformat(), "subject": {k: cfg[k] for k in ("code", "name") if k in cfg},
            "target": target, "papers": [{"id": p["id"], "label": p["label"], "type": p["type"], "course": p["course"]} for p in papers],
            "n_questions": len(qs), "n_families": n_fam, "alpha_history": cfg.get("alpha_history", 0.25) if p_hist is not None else 0.0,
@@ -514,7 +540,7 @@ def main():
                       for i, t in enumerate(order)],
            "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper,
            "warnings": warnings}
-    json.dump(out, open(os.path.join(D, "results.json"), "w"), indent=1, ensure_ascii=False)
+    json.dump(out, open(os.path.join(D, "results.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     write_markdown(out, cfg, os.path.join(D, "FORECAST.md"))
     report(out)
 
@@ -522,7 +548,8 @@ def main():
 def write_markdown(o, cfg, path):
     L = [f"# {cfg['name']} ({cfg['code']}) forecast: {o['target']['label']}",
          f"Generated {o['generated']} by the ktu-exam-predictor skill from {len(o['papers'])} papers"
-         + (f" ({', '.join(p['label'] + ' ' + p['course'] for p in o['papers'])})" if o["papers"] else "") + ".", "",
+         + (f" ({', '.join(p['label'] if p['course'] in p['label'] else p['label'] + ' ' + p['course'] for p in o['papers'])})"
+            if o["papers"] else "") + ".", "",
          f"Topic probability = history x {o['alpha_history']:.2f} + notes prior x {1 - o['alpha_history']:.2f}. "
          "Study order is module-balanced. Notes pages refer to the PDFs in `notes/`. "
          "Coverage tables use the share of the syllabus studied (by notes pages), so subjects with few or many "
@@ -535,7 +562,10 @@ def write_markdown(o, cfg, path):
         L += [f"| {K} | {v['mean']:.0%} | {v['worst']:.0%} | {v['random']:.0%} |" for K, v in o["backtest"].items()]
         L.append("")
     for h in o["holdout"]:
-        L += [f"## Holdout: {h['paper']} forecast from earlier papers only", "",
+        L += [f"## Holdout: {h['paper']} forecast from earlier papers only", ""]
+        if h.get("optimistic"):
+            L += ["*Optimistic: this paper's questions helped build the subtopics, so the real accuracy is lower.*", ""]
+        L += [
               "| Syllabus studied | " + " | ".join(h["curves"]) + " |", "|---|" + "---|" * len(h["curves"])]
         for K in ("30%", "40%", "50%", "60%", "70%"):
             L.append(f"| {K} | " + " | ".join(f"{c[K]:.0%}" for c in h["curves"].values()) + " |")
@@ -546,7 +576,7 @@ def write_markdown(o, cfg, path):
         L.append(f"| {t['rank']} | {t['name']} | M{t['module']} | {t['p']:.2f} | {t['p_history']:.2f} | {t['p_notes']:.2f} | "
                  f"{', '.join(t['notes']) or (('within ' + ', '.join(t['notes_parent'])) if t.get('notes_parent') else 'not in notes')} | {t['asked']} |")
     if o["questions"]:
-        L += ["", f"## Questions most likely to be reused (about {o['expected_repeats']:.0f} expected)", "",
+        L += ["", f"## Questions most likely to be reused (about {o['expected_repeats']:.1f} of the paper's questions expected to repeat)", "",
               "| P | Question (latest wording) | Module | Asked in |", "|---|---|---|---|"]
         for x in o["questions"][:40]:
             L.append(f"| {x['p']:.2f} | {x['latest'].replace('|', '/')} | M{x['module']} | {', '.join(x['sessions'])} |")
@@ -559,7 +589,7 @@ def write_markdown(o, cfg, path):
             for q in b:
                 L.append(f"- Part B option {i}: {q['latest']}" + (" *(not asked before)*" if q["new"] else f" *({', '.join(q['sessions'])})*"))
         L.append("")
-    open(path, "w").write("\n".join(L) + "\n")
+    open(path, "w", encoding="utf-8").write("\n".join(L) + "\n")
 
 
 def report(o):

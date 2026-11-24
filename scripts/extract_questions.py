@@ -173,7 +173,7 @@ def check(qs):
 
 
 def check_only(D):
-    P = json.load(open(os.path.join(D, "papers.json")))
+    P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
     bad = 0
     for p in P["papers"]:
         if p.get("duplicate_of"):
@@ -190,7 +190,7 @@ def check_only(D):
         bad += bool(probs)
         print(f"  {p['label']:24s} {len(qs):2d} sub-questions, {scheme} scheme, {p['extract_status']}"
               + (f", {untagged} untagged" if untagged else ""))
-    json.dump(P, open(os.path.join(D, "papers.json"), "w"), indent=1, ensure_ascii=False)
+    json.dump(P, open(os.path.join(D, "papers.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     print("all papers pass" if not bad else f"{bad} paper(s) still need fixing")
 
 
@@ -200,28 +200,38 @@ def main():
         return check_only(D)
     force = "--force" in sys.argv
     pj = os.path.join(D, "papers.json")
-    P = json.load(open(pj))
+    P = json.load(open(pj, encoding="utf-8"))
     report = ["# Question extraction report", "",
               "Status per paper. `ok` = numbering and marks match the KTU pattern (still skim the text). "
               "`review` = fix from the PDF / pyq/img pages. Topics are empty: tag them from topics.json.", ""]
     for p in P["papers"]:
-        if p.get("questions") and not force and not p.get("auto"):
+        if p.get("questions") and not force:      # never overwrite existing (possibly hand-fixed) questions
             report.append(f"- {p['label']}: kept (already has {len(p['questions'])} questions)")
             continue
         src = p.get("source")
         txt = os.path.join(D, src[:-4] + ".txt") if src else None
-        text = open(txt, errors="replace").read() if txt and os.path.exists(txt) else ""
+        text = open(txt, errors="replace", encoding="utf-8").read() if txt and os.path.exists(txt) else ""
         if len(text) < 3000:
             p.update({"questions": [], "auto": True, "extract_status": "review: scanned or no text - transcribe from pyq/img"})
             report.append(f"- **{p['label']}**: SCANNED / little text -> transcribe from `pyq/img/` images")
             continue
-        a, b = split_parts(clean_lines(text))
+        lines = clean_lines(text)
+        a, b = split_parts(lines)
         if a is None:
-            p.update({"questions": [], "auto": True, "extract_status": "review: PART A/PART B headings not found"})
-            report.append(f"- **{p['label']}**: PART A / PART B headings not found -> transcribe by hand")
-            continue
-        bare = sum(bool(MARK.match(l)) for l in a + b) < 5      # this paper prints marks without brackets
-        qs = number(collect(a, "A", bare), collect(b, "B", bare))
+            # no PART headings found (garbled OCR): the opening run of 3-mark items is Part A, the rest Part B
+            bare = sum(bool(MARK.match(l)) for l in lines) < 5
+            items = collect(lines, "B", bare)
+            k = 0
+            while k < len(items) and k < 10 and items[k].get("marks") == 3:
+                k += 1
+            if k < 4:
+                p.update({"questions": [], "auto": True, "extract_status": "review: PART A/PART B not found"})
+                report.append(f"- **{p['label']}**: could not find Part A / Part B -> transcribe by hand")
+                continue
+            qs = number(items[:k], [i for i in items[k:] if "marks" in i or i.get("marker")])
+        else:
+            bare = sum(bool(MARK.match(l)) for l in a + b) < 5      # this paper prints marks without brackets
+            qs = number(collect(a, "A", bare), collect(b, "B", bare))
         scheme, probs = check(qs)
         st = "ok" if not probs else "review: " + "; ".join(probs)
         p.update({"questions": qs, "auto": True, "scheme": scheme, "extract_status": st})
@@ -233,7 +243,7 @@ def main():
         src = p.get("source")
         txt = os.path.join(D, src[:-4] + ".txt") if src else ""
         if txt and os.path.exists(txt):
-            body = open(txt, errors="replace").read()
+            body = open(txt, errors="replace", encoding="utf-8").read()
             if "PART" in body:
                 words = set(re.findall(r"[a-z]{4,}", body[body.find("PART"):].lower()))   # skip the ktunotes cover page
                 if len(words) >= 150:          # enough real paper text to compare
@@ -249,8 +259,8 @@ def main():
                 p["duplicate_of"] = o["id"]
                 report.append(f"- **{p['label']}** looks like a duplicate of {o['label']}: marked duplicate_of (skipped by predict.py)")
                 break
-    json.dump(P, open(pj, "w"), indent=1, ensure_ascii=False)
-    open(os.path.join(D, "pyq", "EXTRACTION.md"), "w").write("\n".join(report) + "\n")
+    json.dump(P, open(pj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    open(os.path.join(D, "pyq", "EXTRACTION.md"), "w", encoding="utf-8").write("\n".join(report) + "\n")
     print("\n".join(report))
 
 

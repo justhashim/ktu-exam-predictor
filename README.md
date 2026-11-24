@@ -69,8 +69,10 @@ git clone https://github.com/justhashim/ktu-exam-predictor ~/.config/opencode/sk
 
 ### Requirements
 
-- Python 3.8 or newer. Nothing to `pip install`.
-- Optional: `poppler-utils` (`pdftotext`, `pdftoppm`) for better PDF text and page images of scanned papers. Without it, the script tries `pypdf` if you have it, and otherwise the agent reads the PDFs itself.
+- Python 3.8 or newer. Nothing to `pip install` for the code itself. On Windows, run `python` or `py` instead of `python3`.
+- **Strongly recommended:** a PDF text tool, either `poppler-utils` (`pdftotext`, `pdftoppm`) or `pip install pypdf`.
+  - Without one, papers and notes are downloaded but can't be read, so there are no questions to learn from. `ktu.py status` tells you.
+  - `pdftoppm` also renders scanned papers as page images that your agent can read.
 
   ```bash
   sudo apt install poppler-utils     # Debian/Ubuntu
@@ -141,7 +143,7 @@ flowchart LR
 | History model | Logistic regression on how often and how recently a topic was asked, whether it was in the last paper, and the gap since | 0.25 |
 | Notes prior | How many notes pages the topic fills, plus a boost for topics in the official model paper | 0.75 |
 
-Questions are grouped into families of the same question across papers. Each family's chance of returning is calibrated to the reuse rate seen in past papers of the same exam type (regular or supplementary).
+Questions are grouped into families of the same question across papers. Each family's chance of returning is scaled so that the expected number of repeats matches the reuse rate seen in past papers of the same exam type (regular or supplementary).
 
 ## Accuracy
 
@@ -160,6 +162,10 @@ What the checks showed:
 - **Topics drawn only from old papers missed new syllabus content** (14 of 60 marks).
 - **One automatic method was rejected:** topics from notes headings alone scored no better than random.
 - **Measuring by number of topics flatters coarse topic lists,** so this project measures by share of the syllabus.
+- **What the measure assumes:** a question counts only if you studied every topic it needs, and you are assumed to master what you study. It's a guide to which topics matter, not a predicted score.
+
+> [!IMPORTANT]
+> How well it works depends on the papers. Many KTU papers on ktunotes are scanned with noisy OCR. Their questions are drafted automatically and checked against the KTU marks pattern; scans with no text need transcribing, and `ktu.py status` lists them. Garbled drafts are left out of the forecast, and `FORECAST.md` warns when the data is too thin for the ranking to mean much.
 
 > [!WARNING]
 > This is one paper, and some settings were chosen while looking at it, so treat the numbers as rough. Predicting the exact wording of a question is weak. The value is in knowing which **topics** to cover, and in covering every module. No forecast replaces studying the notes.

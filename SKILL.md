@@ -8,8 +8,10 @@ description: Predict the important topics and likely questions for any KTU B.Tec
 You get a course code or name, and sometimes an exam date or a paper count. Produce a forecast the student can study from: which topics matter, in what order, with every past version of each question. Then teach it.
 
 **Scripts:** the `scripts/` folder next to this SKILL.md. Call it `$S`; use the base directory you were given when the skill loaded.
-- **No installs needed:** they use only the Python 3 standard library.
-- **poppler-utils** (`pdftotext`, `pdftoppm`) is optional. It improves PDF text; without it, read PDFs with your own file-reading tool.
+- **Python 3.8+ only:** they use just the standard library. On Windows, use `python` or `py` instead of `python3`.
+- **A PDF text tool is strongly recommended:** poppler-utils (`pdftotext`), or `pip install pypdf`.
+  - Without one, the PDFs are downloaded but not read, so there are no questions.
+  - `prepare` and `status` say so. If you can't install either, read the PDFs yourself and write the questions into `papers.json`.
 
 ## 1. Run the pipeline (one command, about a minute)
 
@@ -29,7 +31,14 @@ It does the following, printing what it did at each step:
 6. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`).
    - The study dir is `$KTU_STUDY_DIR`, else `~/Documents/Study Materials` if it exists, else `~/KTU Exams`.
 
-**Check the course and predecessors it printed.** A similarly named course with different content (an ECE version, say) adds noise. Rerun with `--old CODE` to force a predecessor, then delete the wrong papers from `papers.json` and `pyq/`.
+**Check the course and predecessors it printed.** If the name matched several courses, a `NOTE: the name also matches` line lists them; rerun with the exact code if needed. A similarly named course with different content (an ECE version, say) adds noise. Rerun with `--old CODE` to force a predecessor, then delete the wrong papers from `papers.json` and `pyq/`.
+
+Re-running `prepare` is safe:
+- It never overwrites questions already in `papers.json`, so hand fixes are kept.
+- It never redrafts an existing `topics.json`.
+- Only new or empty papers are drafted. Use `extract_questions.py <dir> --force` to redraft everything.
+
+Old-scheme course codes (e.g. CST306) work too, with the 2019 pattern of 10 × 3 marks and 5 modules × 14.
 
 ## 2. Read the forecast and the status
 
@@ -41,6 +50,14 @@ Open `FORECAST.md`. It contains:
 - the module-balanced study order, with notes pages
 - the likely-repeat questions
 - an assembled likely paper
+
+**Read the warnings at the top of `FORECAST.md` first.** They say when:
+- there are too few usable papers
+- garbled papers were left out
+- the history model did no better than random on past papers
+- no question repeated
+
+When they appear, the ranking is weak: tell the student so and cover every module evenly.
 
 `status` lists what is still automatic-quality:
 - papers whose drafts failed the KTU marks check, or that are scans with no questions

@@ -16,9 +16,10 @@ Fetch study sources for a KTU subject from ktunotes.live (public Google Drive fi
 Downloads go to SUBJECT_DIR/notes/ and SUBJECT_DIR/pyq/. For each PDF a .txt (pdftotext -layout) is written;
 PDFs without a text layer (scans) are also rendered to PNG pages in pyq/img/ so they can be read as images.
 Subject folders: $KTU_STUDY_DIR or ~/Documents/Study Materials/<SHORT>/predictor/. Cache: ~/.cache/ktu-exam-predictor.
-Needs: python3 (stdlib only), poppler-utils (pdftotext, pdftoppm).
+Needs: Python 3.8+ (standard library only). Optional: poppler-utils (pdftotext, pdftoppm) or the pypdf package
+for PDF text; without either, PDFs are downloaded but not read (ktu.py status says so).
 """
-import html, json, os, re, shutil, subprocess, sys, urllib.request
+import html, json, os, re, shutil, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 def _study_root():
@@ -30,7 +31,8 @@ def _study_root():
 
 
 STUDY = _study_root()
-CACHE = os.path.expanduser("~/.cache/ktu-exam-predictor")   # ktunotes indexes; delete to refresh
+CACHE = os.path.expanduser(os.environ.get("KTU_CACHE_DIR", "~/.cache/ktu-exam-predictor"))   # ktunotes indexes
+CACHE_DAYS = 7
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) study-helper"}
 
 
@@ -42,12 +44,18 @@ def get(url, binary=False, timeout=120):
 
 
 def cached(name, fn):
+    """Cache an index for CACHE_DAYS. Empty results are never cached, so a site hiccup does not stick."""
     os.makedirs(CACHE, exist_ok=True)
     p = os.path.join(CACHE, name)
-    if os.path.exists(p):
-        return json.load(open(p))
+    if os.path.exists(p) and time.time() - os.path.getmtime(p) < CACHE_DAYS * 86400:
+        v = json.load(open(p, encoding="utf-8"))
+        if v and any(v.values() if isinstance(v, dict) else v):
+            return v
     v = fn()
-    json.dump(v, open(p, "w"))
+    if v and any(v.values() if isinstance(v, dict) else v):
+        json.dump(v, open(p, "w", encoding="utf-8"))
+    else:
+        print("warning: could not read the ktunotes index (site down or changed); nothing cached", file=sys.stderr)
     return v
 
 
@@ -132,7 +140,7 @@ def pdf_text(pdf, txt):
         return os.path.exists(txt)
     try:
         from pypdf import PdfReader
-        open(txt, "w").write("\f".join((pg.extract_text() or "") for pg in PdfReader(pdf).pages))
+        open(txt, "w", encoding="utf-8").write("\f".join((pg.extract_text() or "") for pg in PdfReader(pdf).pages))
         return True
     except Exception:
         return False
@@ -143,7 +151,7 @@ def to_text(pdf, imgdir=None, min_total=0):
     if not pdf_text(pdf, txt):
         return "no text tool (install poppler-utils, or read the PDF directly)"
     n = os.path.getsize(txt) if os.path.exists(txt) else 0
-    pages = max(1, open(txt, errors="replace").read().count("\f")) if n else 1
+    pages = max(1, open(txt, errors="replace", encoding="utf-8").read().count("\f")) if n else 1
     if (n / pages < 300 or n < min_total) and imgdir:   # little text per page = scanned: render pages to read as images
         os.makedirs(imgdir, exist_ok=True)
         base = os.path.join(imgdir, os.path.basename(pdf)[:-4])
@@ -188,7 +196,7 @@ def cmd_notes(code, D, folder=None):
     if folder:
         pick = [(p, it) for p, it in pick if any(folder.lower() in x.lower() for x in p)]
     else:   # default: typed notes - skip handwritten/model/Q&A folders; prefer a folder named NOTES
-        skip = ("HANDWRITTEN", "MODEL", "Q&A", "QA BANK", "SET ")
+        skip = ("HANDWRITTEN", "MODEL", "Q&A", "QA BANK", "PROBLEM", "PYQ", "QUESTION", "PREVIOUS")
         typed = [(p, it) for p, it in pick if not any(s in x.upper() for x in p for s in skip)]
         pick = [(p, it) for p, it in typed if any("NOTES" in x.upper() for x in p)] or typed
     os.makedirs(os.path.join(D, "notes"), exist_ok=True)
@@ -201,7 +209,7 @@ def cmd_notes(code, D, folder=None):
             continue
         print("  ", to_text(path, os.path.join(D, "notes", "img")))
         outl += [f"===== {name}"] + outline(path)
-    open(os.path.join(D, "notes", "OUTLINE.txt"), "w").write("\n".join(outl) + "\n")
+    open(os.path.join(D, "notes", "OUTLINE.txt"), "w", encoding="utf-8").write("\n".join(outl) + "\n")
     print("outline written to", os.path.join(D, "notes", "OUTLINE.txt"))
 
 
@@ -294,6 +302,7 @@ def resolve(query, extra_old=()):
     v = viewer()
     cat = v["catalog"]
     q = query.strip()
+    alternatives = []
     hit = next((c for c in cat if c["code"].lower() == q.lower()), None)
     if not hit:   # by short name / keyword, then by name similarity (prefer 2024-scheme CSE courses)
         kw = [code for code, ks in v["keywords"].items() if q.lower() in [k.lower() for k in ks]]
@@ -303,6 +312,9 @@ def resolve(query, extra_old=()):
             ranked = sorted(cat, key=lambda c: (-name_sim(q, c["name"]), is_old_code(c["code"]), c["branch"] != "CSE"))
             if ranked and name_sim(q, ranked[0]["name"]) >= 0.5:
                 hit = ranked[0]
+                top = name_sim(q, hit["name"])
+                alternatives = [f"{c['code']} {c['name']} ({c['branch']} {c['sem']})" for c in ranked[1:12]
+                                if name_sim(q, c["name"]) >= 0.75 * top and c["code"] != hit["code"]][:5]
     if not hit:
         sys.exit(f"Could not resolve '{query}'. Try the exact course code, or `fetch.py search <words>`.")
     code, name = hit["code"], hit["name"]
@@ -314,17 +326,36 @@ def resolve(query, extra_old=()):
         if m:
             avail.setdefault(m.group(1), {"name": m.group(2).replace("_", " "), "n": 0})["n"] += 1
     cands = {}
+    branch = hit.get("branch") or ""
+    votes = {}                                   # letter prefix -> branches, to guess the branch of uncatalogued codes
+    for c in cat:
+        pre = re.match(r"[A-Z]+", c["code"]).group(0)
+        votes.setdefault(pre, {}).setdefault(c["branch"], 0)
+        votes[pre][c["branch"]] += 1
+    cat_branch = {c["code"]: c["branch"] for c in cat}
+
+    def branch_of(cd):
+        if cd in cat_branch:
+            return cat_branch[cd]
+        v_ = votes.get(re.match(r"[A-Z]+", cd).group(0), {})
+        return max(v_, key=v_.get) if v_ else ""
     for i, c in enumerate(cat):
         if c["code"] == code:
             for nb in cat[max(0, i - 2): i + 3]:
                 if is_old_code(nb["code"]) and name_sim(name, nb["name"]) >= 0.3:
-                    cands[nb["code"]] = max(cands.get(nb["code"], 0), name_sim(name, nb["name"]) + 0.3)
+                    other = branch and nb["branch"] and nb["branch"] != branch
+                    cands[nb["code"]] = max(cands.get(nb["code"], 0), name_sim(name, nb["name"]) + 0.3 - (0.5 if other else 0))
     for c in cat:
         if is_old_code(c["code"]) and name_sim(name, c["name"]) >= 0.75:
-            cands[c["code"]] = max(cands.get(c["code"], 0), name_sim(name, c["name"]) + (0.1 if c["branch"] == "CSE" else 0))
+            other = branch and c["branch"] and c["branch"] != branch          # e.g. an ECE course for a CSE subject
+            cands[c["code"]] = max(cands.get(c["code"], 0), name_sim(name, c["name"]) + (0.1 if c["branch"] == branch else 0)
+                                   - (0.5 if other else 0))
     for oc, a in avail.items():
         if is_old_code(oc) and name_sim(name, a["name"]) >= 0.75:
-            cands[oc] = max(cands.get(oc, 0), name_sim(name, a["name"]))
+            other = branch and branch_of(oc) and branch_of(oc) != branch
+            cands[oc] = max(cands.get(oc, 0), name_sim(name, a["name"]) - (0.5 if other else 0))
+    cands.pop(code, None)                       # a course is never its own predecessor
+    cands = {c: v for c, v in cands.items() if v >= 0.6 or c in {x.upper() for x in extra_old}}
     for oc in extra_old:
         cands[oc.upper()] = 9.9
     old = [oc for oc in sorted(cands, key=lambda c: (-cands[c], -avail.get(c, {}).get("n", 0))) if avail.get(oc, {}).get("n") or oc in extra_old]
@@ -333,7 +364,8 @@ def resolve(query, extra_old=()):
         toks = [w for w in re.findall(r"[A-Za-z]+", name) if w.lower() not in STOPW]
         short = "".join(w[0] for w in toks).upper() if len(toks) > 1 else (toks[0][:5].upper() if toks else code)
     sem = hit.get("sem", "")
-    return {"code": code, "name": name, "sem": sem, "short": short, "old_codes": old[:4],
+    return {"code": code, "name": name, "sem": sem, "branch": hit.get("branch", ""), "alternatives": alternatives,
+            "old_codes": old[:4], "short": short,
             "old_detail": {oc: {"score": round(cands[oc], 2), "papers": avail.get(oc, {}).get("n", 0),
                                 "name": avail.get(oc, {}).get("name", "")} for oc in old[:6]}}
 
@@ -352,7 +384,9 @@ def paper_list(codes, sem):
         years = [int(t) for t in rest if re.fullmatch(r"20\d\d", t)]
         mon = next((MONTHS[t] for t in rest if t in MONTHS), 0)
         fid = re.search(r"id=([A-Za-z0-9_-]+)", url) or re.search(r"/d/([A-Za-z0-9_-]+)", url)
-        rows.append({"file": f, "code": m.group(1), "year": years[0] if years else 0, "month": mon,
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(f)).lstrip(".")   # never a path from the index
+        rows.append({"file": safe, "code": m.group(1), "year": years[0] if years else 0, "month": mon,
+                     "supp": "SUPPLE" in f.upper(),
                      "id": fid.group(1) if fid else None, "url": None})
     for r in idx["mbcet"]:
         c = next((c for c in codes if c in r["title"].upper().replace(" ", "")), None)
@@ -372,7 +406,7 @@ def paper_list(codes, sem):
         s = sems.get(r["code"], sem)
         odd = s[1:].isdigit() and int(s[1:]) % 2 == 1
         reg = (r["month"] in (10, 11, 12, 1, 2)) if odd else (r["month"] in (4, 5, 6, 7, 8))
-        r["type"] = "regular" if (r["month"] == 0 or reg) else "supplementary"
+        r["type"] = "supplementary" if r.get("supp") else ("regular" if (r["month"] == 0 or reg) else "supplementary")
         r["label"] = (f"{MON_NAME[r['month']]} {r['year']}" if r["month"] else f"{r['year']}") + f" {r['code']}"
         r["pid"] = (MON_NAME[r["month"]].upper() if r["month"] else "Y") + str(r["year"])[2:] + "_" + r["code"]
     cur = codes[0]
@@ -383,15 +417,19 @@ def paper_list(codes, sem):
 def cmd_setup(query, n=10, extra_old=(), short=None):
     info = resolve(query, extra_old)
     sm = STUDY
+    os.makedirs(sm, exist_ok=True)
     folder = None
     for d in sorted(os.listdir(sm)):   # reuse a folder that already holds this course
         sj = os.path.join(sm, d, "predictor", "subject.json")
-        if os.path.exists(sj) and json.load(open(sj)).get("code") == info["code"]:
+        if os.path.exists(sj) and json.load(open(sj, encoding="utf-8")).get("code") == info["code"]:
             folder = d
     folder = folder or short or info["short"]
     D = os.path.join(sm, folder, "predictor")
     os.makedirs(D, exist_ok=True)
-    print(f"Course: {info['code']} {info['name']} ({info['sem']})  -> {D}")
+    print(f"Course: {info['code']} {info['name']} ({info['branch']} {info['sem']})  -> {D}")
+    if info["alternatives"]:
+        print("  NOTE: the name also matches:", "; ".join(info["alternatives"]),
+              "\n  If that is the course you meant, rerun with its exact code.")
     print("Predecessors with past papers:", info["old_detail"] or "none found (use --old CODE)")
     codes = [info["code"]] + info["old_codes"]
     picks = paper_list(codes, info["sem"])[:n]
@@ -413,26 +451,31 @@ def cmd_setup(query, n=10, extra_old=(), short=None):
         print("  ", e)
         notes_ok = False
     sj = os.path.join(D, "subject.json")
-    cfg = json.load(open(sj)) if os.path.exists(sj) else {}
+    cfg = json.load(open(sj, encoding="utf-8")) if os.path.exists(sj) else {}
     cfg.update({"code": info["code"], "name": info["name"], "short": folder, "old_codes": info["old_codes"],
                 "semester": info["sem"]})
-    cfg.setdefault("modules", 4)
-    cfg.setdefault("pattern", {"part_a": 8, "part_a_marks": 3, "part_b_marks": 9, "subq": 26})
-    cfg.setdefault("_pattern_note", "assumed 2024-scheme pattern (8x3 + 4x9); verify with the model paper")
+    if is_old_code(info["code"]):     # a 2019-scheme (or older) course: 10 x 3 + 5 modules x 14
+        cfg.setdefault("modules", 5)
+        cfg.setdefault("pattern", {"part_a": 10, "part_a_marks": 3, "part_b_marks": 14, "subq": 30})
+        cfg.setdefault("_pattern_note", "assumed 2019-scheme pattern (10x3 + 5x14); verify with a recent paper")
+    else:
+        cfg.setdefault("modules", 4)
+        cfg.setdefault("pattern", {"part_a": 8, "part_a_marks": 3, "part_b_marks": 9, "subq": 26})
+        cfg.setdefault("_pattern_note", "assumed 2024-scheme pattern (8x3 + 4x9); verify with the model paper")
     cfg.setdefault("alpha_history", 0.25)
     cfg.setdefault("course_boost", 3.0)
     cfg.setdefault("new_topic_questions", {})
-    json.dump(cfg, open(sj, "w"), indent=1)
+    json.dump(cfg, open(sj, "w", encoding="utf-8"), indent=1)
     pj = os.path.join(D, "papers.json")
-    have = {p["id"] for p in json.load(open(pj))["papers"]} if os.path.exists(pj) else set()
-    P = json.load(open(pj)) if os.path.exists(pj) else {"_note": "Fill questions[] for each paper: "
+    have = {p["id"] for p in json.load(open(pj, encoding="utf-8"))["papers"]} if os.path.exists(pj) else set()
+    P = json.load(open(pj, encoding="utf-8")) if os.path.exists(pj) else {"_note": "Fill questions[] for each paper: "
          "{q: A1|B11a, marks, topics: [keys from topics.json], text}. Remove a paper if it is a duplicate session.", "papers": []}
     for r, st in sorted(status, key=lambda x: (x[0]["year"], x[0]["month"])):
         if r["pid"] not in have and "FAILED" not in st:
             P["papers"].append({"id": r["pid"], "label": r["label"], "type": r["type"], "course": r["code"],
                                 "source": "pyq/" + r["file"], "questions": []})
     P["papers"].sort(key=lambda p: (int(re.search(r"\d\d", p["id"]).group(0)), MON_NAME.index(p["id"][:3].title()) if p["id"][:3].title() in MON_NAME else 0))
-    json.dump(P, open(pj, "w"), indent=1, ensure_ascii=False)
+    json.dump(P, open(pj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     lines = [f"# {info['name']} ({info['code']}) predictor: status", "",
              f"Set up by `fetch.py setup` from the query '{query}'.", "",
              f"- Predecessor courses used: {', '.join(info['old_codes']) or 'none'} ({json.dumps(info['old_detail'])})",
@@ -444,7 +487,7 @@ def cmd_setup(query, n=10, extra_old=(), short=None):
               "2. topics.json: one topic per notes section, with pages and modules",
               "3. tag every question's topics in papers.json",
               "4. predict.py . --type regular --label \"<Mon YYYY>\"", ""]
-    open(os.path.join(D, "STATUS.md"), "w").write("\n".join(lines))
+    open(os.path.join(D, "STATUS.md"), "w", encoding="utf-8").write("\n".join(lines))
     print("\nWrote subject.json, papers.json (skeleton), STATUS.md in", D)
     return D
 

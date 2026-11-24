@@ -47,7 +47,7 @@ def subject_dir(arg):
     code = fetch.resolve(arg)["code"]
     for d in sorted(os.listdir(fetch.STUDY)) if os.path.isdir(fetch.STUDY) else []:
         sj = os.path.join(fetch.STUDY, d, "predictor", "subject.json")
-        if os.path.exists(sj) and json.load(open(sj)).get("code") == code:
+        if os.path.exists(sj) and json.load(open(sj, encoding="utf-8")).get("code") == code:
             return os.path.join(fetch.STUDY, d, "predictor")
     sys.exit(f"No subject folder for {code} yet. Run: ktu.py prepare \"{arg}\"")
 
@@ -85,7 +85,7 @@ def notes_pages(D):
             continue
         m = re.search(r"(?:^|[^A-Za-z])(?:M|MOD|MODULE)[\s_-]*0?([1-6])(?!\d)", f, re.I)
         mod = int(m.group(1)) if m else None
-        for i, pg in enumerate(open(os.path.join(nd, f), errors="replace").read().split("\f"), 1):
+        for i, pg in enumerate(open(os.path.join(nd, f), errors="replace", encoding="utf-8").read().split("\f"), 1):
             hm = re.search(r"(?im)^\s*MODULE\s*[-:]?\s*0?([1-6])\b", pg[:400])
             if hm:
                 mod = int(hm.group(1))
@@ -157,7 +157,7 @@ def draft_topics(D, redo=False):
     tj = os.path.join(D, "topics.json")
     if os.path.exists(tj) and not redo:
         return "kept existing topics.json"
-    cfg = json.load(open(os.path.join(D, "subject.json")))
+    cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
     pages = notes_pages(D)
     data = topics_page(cfg["code"])
     topics = {}
@@ -244,6 +244,21 @@ def draft_topics(D, redo=False):
                 t[field] = [f"M{t['module']}:{a}-{b}" if a != b else f"M{t['module']}:{a}" for _, a, b in rr]
             if rr:
                 t[field + "_src"] = rr      # [notes file, first page, last page]
+    # 4) LAST RESORT for modules with no topics at all (no topic list, no notes text): groups of the course's own
+    #    past questions in that module (module known from the question number)
+    have = {t["module"] for t in topics.values()}
+    pj = os.path.join(D, "papers.json")
+    if any(m not in have for m in mods) and os.path.exists(pj):
+        for m in [m for m in mods if m not in have]:
+            qm = [q for p in json.load(open(pj, encoding="utf-8"))["papers"] if p.get("course") == cfg["code"]
+                  and not p.get("duplicate_of") for q in p.get("questions", []) if module_of(q["q"], p.get("scheme")) == m]
+            if len(qm) < 2:
+                continue
+            for g in [g for g in _clusters(tfidf([toks(q["text"]) for q in qm]), 0.2) if len(g) >= 2]:
+                texts = [qm[i]["text"] for i in g]
+                lab = _label(texts, [q["text"] for q in qm])
+                add(f"M{m}_{lab}", {"name": f"Module {m}: {lab}", "module": m, "syllabus": "in", "model": False,
+                                    "notes": [], "weight_hint": 1.0, "examples": texts[:6], "source": "past questions"})
     topics[OFF_SYLLABUS] = {"name": "Not in the current syllabus (old-course questions)", "module": 0,
                             "syllabus": "old", "model": False, "notes": [], "source": "bucket"}
     srcs = {}
@@ -254,24 +269,27 @@ def draft_topics(D, redo=False):
     if missing:
         src += f"; NO topics for modules {missing}"
     json.dump({"_note": f"Drafted automatically: {src}. Edit freely: merge, split, rename, add topics from scanned notes.",
-               "topics": topics}, open(tj, "w"), indent=1, ensure_ascii=False)
+               "topics": topics}, open(tj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return src
 
 
 # ------------------------------------------------------------------ auto-tagging
 def module_of(qid, scheme):
-    """Module a question belongs to in a 2024-scheme paper (A1-2 -> M1 ..., B9/10 -> M1 ...)."""
-    if scheme != "2024":
+    """Module of a question from its number. 2024 scheme: A1-2 -> M1 ..., B9/10 -> M1 ... (4 modules).
+    2019 scheme: A1-2 -> M1 ..., B11/12 -> M1 ... (5 modules). None if unknown."""
+    m = re.match(r"([AB])(\d+)", qid or "")
+    if not m or scheme not in ("2024", "2019"):
         return None
-    m = re.match(r"([AB])(\d+)", qid)
     n = int(m.group(2))
-    return (n + 1) // 2 if m.group(1) == "A" else (n - 9) // 2 + 1
+    if m.group(1) == "A":
+        return (n + 1) // 2
+    return (n - (9 if scheme == "2024" else 11)) // 2 + 1
 
 
 def autotag(D, retag=False):
-    P = json.load(open(os.path.join(D, "papers.json")))
-    T = json.load(open(os.path.join(D, "topics.json")))["topics"]
-    cfg = json.load(open(os.path.join(D, "subject.json")))
+    P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
+    T = json.load(open(os.path.join(D, "topics.json"), encoding="utf-8"))["topics"]
+    cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
     keys = [k for k in T if T[k].get("module")]          # the OFF_SYLLABUS bucket (module 0) is never a match
     pages = {(f, i): pg for f, i, _, pg in notes_pages(D)}
     docs = []
@@ -289,6 +307,8 @@ def autotag(D, retag=False):
     low = 0
     for (p, q), v in zip(qs, qv):
         mod = module_of(q["q"], p.get("scheme")) if p.get("course") == cfg["code"] else None
+        if mod is not None and not any(T[k]["module"] == mod for k in keys):
+            mod = None
         cands = sorted(((cos(v, tv[j]), k) for j, k in enumerate(keys) if mod is None or T[k]["module"] == mod), reverse=True)
         if not cands:
             continue
@@ -298,7 +318,7 @@ def autotag(D, retag=False):
             tags = [OFF_SYLLABUS]            # an old-course question unlike everything in the current syllabus
         q["topics"], q["tag_score"], q["auto_tag"] = tags, round(best, 3), True
         low += best < LOW_TAG_SIM
-    json.dump(P, open(os.path.join(D, "papers.json"), "w"), indent=1, ensure_ascii=False)
+    json.dump(P, open(os.path.join(D, "papers.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return len(qs), low
 
 
@@ -353,7 +373,7 @@ def split_topics(D, exclude_papers=()):
     holding far more questions than its siblings is split. Questions are re-tagged to their subtopic;
     single leftover questions stay with the parent. Each subtopic gets a share of the parent's weight."""
     tj, pj = os.path.join(D, "topics.json"), os.path.join(D, "papers.json")
-    TJ, P = json.load(open(tj)), json.load(open(pj))
+    TJ, P = json.load(open(tj, encoding="utf-8")), json.load(open(pj, encoding="utf-8"))
     T = TJ["topics"]
     live = [q for p in P["papers"] if not p.get("duplicate_of") and p["id"] not in exclude_papers for q in p.get("questions", [])]
     held = [q for p in P["papers"] if not p.get("duplicate_of") and p["id"] in exclude_papers for q in p.get("questions", [])]
@@ -424,44 +444,75 @@ def split_topics(D, exclude_papers=()):
         t["name"] = t["name"] + " (other)"
         per_mod[t["module"]] += len(groups)
     TJ["topics"] = T
-    json.dump(TJ, open(tj, "w"), indent=1, ensure_ascii=False)
-    json.dump(P, open(pj, "w"), indent=1, ensure_ascii=False)
+    if made:
+        TJ["_split_built_without"] = sorted(exclude_papers)   # papers whose questions did NOT shape the subtopics
+    json.dump(TJ, open(tj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+    json.dump(P, open(pj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return made
 
 # ------------------------------------------------------------------ status
+def text_tool():
+    if fetch.shutil.which("pdftotext"):
+        return "pdftotext"
+    try:
+        import pypdf  # noqa: F401
+        return "pypdf"
+    except Exception:
+        return None
+
+
 def status(D, quiet=False):
-    cfg = json.load(open(os.path.join(D, "subject.json")))
-    P = json.load(open(os.path.join(D, "papers.json")))["papers"] if os.path.exists(os.path.join(D, "papers.json")) else []
-    T = json.load(open(os.path.join(D, "topics.json")))["topics"] if os.path.exists(os.path.join(D, "topics.json")) else {}
+    cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
+    pj, tj = os.path.join(D, "papers.json"), os.path.join(D, "topics.json")
+    P = json.load(open(pj, encoding="utf-8"))["papers"] if os.path.exists(pj) else []
+    T = json.load(open(tj, encoding="utf-8"))["topics"] if os.path.exists(tj) else {}
+    dups = [p for p in P if p.get("duplicate_of")]
     live = [p for p in P if not p.get("duplicate_of")]
-    ok = [p for p in live if p.get("extract_status") == "ok"]
     empty = [p for p in live if not p.get("questions")]
-    review = [p for p in live if p.get("questions") and p.get("extract_status", "ok") != "ok"]
-    qs = [q for p in live for q in p.get("questions", [])]
-    lowc = [q for q in qs if q.get("auto_tag") and q.get("tag_score", 1) < LOW_TAG_SIM and q.get("topics") != [OFF_SYLLABUS]]
+    used = [p for p in live if p.get("questions")]
+    ok = [p for p in used if p.get("extract_status") == "ok"]
+    review = [p for p in used if p.get("extract_status", "ok") != "ok"]
+    qs = [q for p in used for q in p.get("questions", [])]
     off = [q for q in qs if q.get("topics") == [OFF_SYLLABUS]]
+    lowc = [q for q in qs if q.get("auto_tag") and q.get("tag_score", 1) < LOW_TAG_SIM and q not in off]
     mods = list(range(1, cfg.get("modules", 4) + 1))
-    scans = scanned_modules(D, mods)
+    nd = os.path.join(D, "notes")
+    notes_pdfs = [f for f in os.listdir(nd) if f.lower().endswith(".pdf")] if os.path.isdir(nd) else []
+    scans = scanned_modules(D, mods) if notes_pdfs else []
     no_topics = [m for m in mods if not any(t["module"] == m for t in T.values())]
+    pyq = os.path.join(D, "pyq")
+    unread = [f for f in os.listdir(pyq) if f.lower().endswith(".pdf") and not os.path.exists(os.path.join(pyq, f[:-4] + ".txt"))] \
+        if os.path.isdir(pyq) else []
+    srcs = {}
+    for t in T.values():
+        if t.get("module"):
+            srcs[t.get("source", "hand-written")] = srcs.get(t.get("source", "hand-written"), 0) + 1
     L = [f"{cfg['name']} ({cfg['code']})  ->  {D}",
-         f"  papers: {len(live)} usable ({len(ok)} clean, {len(review)} drafted with problems, {len(empty)} empty), "
-         f"{len(P) - len(live)} duplicates skipped",
-         f"  questions: {len(qs)} ({sum(1 for q in qs if q.get('auto_tag'))} auto-tagged, {len(lowc)} low-confidence tags, "
+         f"  papers: {len(used)} with questions ({len(ok)} clean, {len(review)} drafted with problems), "
+         f"{len(empty)} without questions, {len(dups)} duplicates skipped",
+         f"  questions: {len(qs)} ({sum(1 for q in qs if q.get('auto_tag'))} auto-tagged, {len(lowc)} low-confidence, "
          f"{len(off)} judged outside the current syllabus)",
-         f"  topics: {len(T)} ({T and next(iter(T.values())).get('source', 'hand-written')})",
+         f"  topics: {sum(srcs.values())} (" + ", ".join(f"{n} {k}" for k, n in srcs.items()) + ")",
          f"  forecast: {'FORECAST.md' if os.path.exists(os.path.join(D, 'FORECAST.md')) else 'not yet'}"]
     todo = []
+    if unread and not text_tool():
+        todo.append(f"{len(unread)} PDFs could not be read: install poppler-utils (Linux: apt/dnf install poppler-utils; "
+                    "macOS: brew install poppler; Windows: pip install pypdf), then run prepare again")
+    if len(used) < 3:
+        todo.append(f"only {len(used)} past papers have questions: the history part of the forecast is weak or absent")
     if no_topics:
-        todo.append(f"modules {no_topics} have no topics: add them to topics.json (notes/img pages if the notes are scans)")
-    if scans:
-        todo.append(f"notes for modules {scans} are scans (notes/img/): topics there have no notes pages")
+        todo.append(f"modules {no_topics} have no topics: add them to topics.json")
+    if not notes_pdfs:
+        todo.append("no notes were downloaded (check `fetch.py list-notes <code>`, or add your own PDFs to notes/)")
+    elif scans:
+        todo.append(f"notes for modules {scans} have no text (scans: see notes/img/)")
     if empty:
-        todo.append("papers with no questions (scans): transcribe from pyq/img/ or the PDF -> " + ", ".join(p["label"] for p in empty))
+        todo.append("papers with no questions: transcribe from pyq/img/ or the PDF -> " + ", ".join(p["label"] for p in empty))
     if review:
         todo.append("papers whose drafts failed the KTU marks check (pyq/EXTRACTION.md) -> " + ", ".join(p["label"] for p in review))
     if lowc:
         todo.append(f"{len(lowc)} questions matched no topic well (tag_score < {LOW_TAG_SIM} in papers.json)")
-    L.append("  improve accuracy (optional, re-run `ktu.py predict` after):" if todo else "  nothing left to check")
+    L.append("  improve accuracy (optional; run `ktu.py predict` again after):" if todo else "  nothing left to check")
     L += [f"   - {t}" for t in todo]
     if not quiet:
         print("\n".join(L))
@@ -475,46 +526,51 @@ def run(script, *args):
     return r
 
 
-def opt(a, name, default=None):
-    return a[a.index(name) + 1] if name in a else default
-
-
 def main():
-    a = sys.argv[1:]
-    if len(a) < 2:
-        sys.exit(__doc__)
-    cmd, subj = a[0], a[1]
-    if cmd == "prepare":
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("command", choices=["prepare", "status", "topics", "autotag", "split", "predict"])
+    ap.add_argument("subject", help="course code, name, or subject folder")
+    ap.add_argument("--papers", type=int, default=10)
+    ap.add_argument("--old", action="append", default=[], help="force a predecessor course code (repeatable)")
+    ap.add_argument("--short", default=None, help="subject folder name, e.g. MC")
+    ap.add_argument("--type", default="regular", choices=["regular", "supplementary"])
+    ap.add_argument("--label", default=None, help='exam label, e.g. "Nov 2026"')
+    ap.add_argument("--redo", action="store_true", help="topics: redraft topics.json")
+    ap.add_argument("--all", action="store_true", help="autotag: retag every question")
+    a = ap.parse_args()
+    pargs = ["--type", a.type] + (["--label", a.label] if a.label else [])
+    if a.command == "prepare":
         print("== 1/5 fetch papers and notes")
-        D = fetch.cmd_setup(subj, int(opt(a, "--papers", 10)), [a[i + 1] for i, x in enumerate(a) if x == "--old"], opt(a, "--short"))
+        D = fetch.cmd_setup(a.subject, a.papers, a.old, a.short)
+        if not text_tool():
+            print("\nWARNING: no PDF text tool (pdftotext or pypdf). Papers and notes were downloaded but cannot be read,"
+                  "\nso there will be no questions. Install poppler-utils (or `pip install pypdf`) and run prepare again.")
         print("\n== 2/5 draft questions from the papers")
-        run("extract_questions.py", D)
-        print(open(os.path.join(D, "pyq", "EXTRACTION.md")).read().split("\n", 4)[-1][:2500])
+        r = run("extract_questions.py", D)
+        rep = os.path.join(D, "pyq", "EXTRACTION.md")
+        if r.returncode == 0 and os.path.exists(rep):
+            print(open(rep, encoding="utf-8").read().split("\n", 4)[-1][:2500])
         print("== 3/5 topics:", draft_topics(D))
         n, low = autotag(D)
         made = split_topics(D)
         print(f"== 4/5 auto-tagged {n} questions ({low} low-confidence); split coarse topics into {made} subtopics")
         print("== 5/5 forecast")
-        args = [D, "--type", opt(a, "--type", "regular")] + (["--label", opt(a, "--label")] if opt(a, "--label") else [])
-        r = run("predict.py", *args)
-        print(r.stdout[-2500:])
+        print(run("predict.py", D, *pargs).stdout[-2500:])
         print("\n".join(status(D, quiet=True)))
         print(f"\nRead {os.path.join(D, 'FORECAST.md')}")
-    elif cmd == "status":
-        status(subject_dir(subj))
-    elif cmd == "topics":
-        print(draft_topics(subject_dir(subj), redo="--redo" in a))
-    elif cmd == "split":
-        print(f"made {split_topics(subject_dir(subj))} subtopics")
-    elif cmd == "autotag":
-        n, low = autotag(subject_dir(subj), retag="--all" in a)
+    elif a.command == "status":
+        status(subject_dir(a.subject))
+    elif a.command == "topics":
+        print(draft_topics(subject_dir(a.subject), redo=a.redo))
+    elif a.command == "split":
+        print(f"made {split_topics(subject_dir(a.subject))} subtopics")
+    elif a.command == "autotag":
+        n, low = autotag(subject_dir(a.subject), retag=a.all)
         print(f"tagged {n} questions ({low} low-confidence)")
-    elif cmd == "predict":
-        D = subject_dir(subj)
-        args = [D, "--type", opt(a, "--type", "regular")] + (["--label", opt(a, "--label")] if opt(a, "--label") else [])
-        print(run("predict.py", *args).stdout)
-    else:
-        sys.exit(__doc__)
+    elif a.command == "predict":
+        r = run("predict.py", subject_dir(a.subject), *pargs)
+        print(r.stdout)
 
 
 if __name__ == "__main__":
