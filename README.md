@@ -75,7 +75,18 @@ brew install poppler && pip install numpy
 
 ### Install
 
-Clone it into your Claude Code skills folder:
+With the [`skills`](https://www.npmjs.com/package/skills) CLI:
+
+```bash
+# for you, in every project (~/.claude/skills/)
+pnpm dlx skills add justhashim/ktu-exam-predictor -g --agent claude-code
+# or only for the current project (.claude/skills/)
+pnpm dlx skills add justhashim/ktu-exam-predictor --agent claude-code
+```
+
+`npx skills add …` works the same way. Leave out `--agent` to choose from the agents the CLI detects. The workflow is written for Claude Code, but the scripts are plain Python and work anywhere.
+
+Or clone it yourself:
 
 ```bash
 git clone https://github.com/justhashim/ktu-exam-predictor ~/.claude/skills/ktu-exam-predictor
@@ -106,7 +117,7 @@ Claude runs the steps below, fixes any papers the extractor flagged, tags the qu
 ### Scripts on their own
 
 ```bash
-S=~/.claude/skills/ktu-exam-predictor/scripts
+S=~/.claude/skills/ktu-exam-predictor/scripts   # or .claude/skills/... for a project install
 
 python3 $S/fetch.py resolve "machine learning"        # which course and predecessors it finds
 python3 $S/fetch.py setup "machine learning" --papers 10

@@ -414,7 +414,7 @@ def cmd_setup(query, n=10, extra_old=(), short=None):
              f"- Notes: {'notes/ (OUTLINE.txt; scans in notes/img/)' if notes_ok else 'NOT FOUND on ktunotes - use the user own PDFs or topics.ktunotes.live'}",
              "- Past papers in pyq/ (txt; scans in pyq/img/):"]
     lines += [f"  - {r['label']} ({r['type']}): {st}" for r, st in status]
-    lines += ["", "To do (scripts are in ~/.claude/skills/ktu-exam-predictor/scripts/):",
+    lines += ["", "To do (scripts are in the ktu-exam-predictor skill's scripts/ folder):",
               "1. extract_questions.py . -> drafts questions[] for every paper; fix papers marked review (pyq/EXTRACTION.md)",
               "2. topics.json: one topic per notes section, with pages and modules",
               "3. tag every question's topics in papers.json",

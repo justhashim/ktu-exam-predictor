@@ -7,7 +7,7 @@ description: Predict the important topics and likely questions for any KTU B.Tec
 
 You get a course code or name, and sometimes the exam date or a number of papers. Turn it into a forecast the student can study from: which topics matter, in what order, with every past version of each question and worked answers.
 
-**Scripts:** `~/.claude/skills/ktu-exam-predictor/scripts/` (call this `$S`).
+**Scripts:** the `scripts/` folder next to this SKILL.md. Call it `$S`. Its location depends on how the skill was installed, e.g. `~/.claude/skills/ktu-exam-predictor/scripts` (global) or `.claude/skills/ktu-exam-predictor/scripts` (project). Use the base directory you were given when this skill loaded. Needs Python 3 with numpy, and poppler-utils.
 - `fetch.py`: finds the course, downloads papers and notes, sets up the folder.
 - `extract_questions.py`: drafts the questions from the downloaded papers.
 - `predict.py`: produces the forecast.
@@ -28,7 +28,7 @@ You get a course code or name, and sometimes the exam date or a number of papers
      - mark the ones whose wording recurs across papers, using `pyq/*.txt`
      - add the notes' worked examples and numericals
   3. Start teaching module by module.
-  4. Hand steps 3–5 to a background subagent (Agent tool), with the subject folder path and this skill's path. When its `FORECAST.md` arrives, adjust the remaining order and say what changed.
+  4. Hand steps 3–5 to a background subagent, if your agent can run one, with the subject folder path and this skill's path. Otherwise do them between teaching sessions. When its `FORECAST.md` arrives, adjust the remaining order and say what changed.
 
 Covering every module matters more than perfect ranking, because each module carries the same marks.
 
@@ -100,7 +100,7 @@ Read `FORECAST.md`, then give, in order of priority:
 3. **Worked answers** for numericals and the notes' own examples, checked by computing them where possible.
 4. **The assembled likely paper**, labelled as a guess.
 
-If the student wants a page to study from, build one with the Artifact tool: forecast, likely questions, and an answer under each question.
+If the student wants a page to study from and your agent can publish pages (e.g. Claude's Artifact tool), build one: forecast, likely questions, and an answer under each question.
 
 Then teach topic by topic. The student says "next" to move on.
 
