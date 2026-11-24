@@ -18,10 +18,18 @@ PDFs without a text layer (scans) are also rendered to PNG pages in pyq/img/ so 
 Subject folders: $KTU_STUDY_DIR or ~/Documents/Study Materials/<SHORT>/predictor/. Cache: ~/.cache/ktu-exam-predictor.
 Needs: python3 (stdlib only), poppler-utils (pdftotext, pdftoppm).
 """
-import html, json, os, re, subprocess, sys, urllib.request
+import html, json, os, re, shutil, subprocess, sys, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STUDY = os.environ.get("KTU_STUDY_DIR", os.path.expanduser("~/Documents/Study Materials"))   # subject folders live here
+def _study_root():
+    """Where subject folders live: $KTU_STUDY_DIR, else ~/Documents/Study Materials if it exists, else ~/KTU Exams."""
+    if os.environ.get("KTU_STUDY_DIR"):
+        return os.path.expanduser(os.environ["KTU_STUDY_DIR"])
+    legacy = os.path.expanduser("~/Documents/Study Materials")
+    return legacy if os.path.isdir(legacy) else os.path.expanduser("~/KTU Exams")
+
+
+STUDY = _study_root()
 CACHE = os.path.expanduser("~/.cache/ktu-exam-predictor")   # ktunotes indexes; delete to refresh
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) study-helper"}
 
@@ -116,14 +124,31 @@ def download_drive(fid, path):
     return False
 
 
+def pdf_text(pdf, txt):
+    """PDF -> text file. Uses pdftotext (poppler) if installed, else the pypdf package if installed.
+    Returns False if neither exists: the agent can still read the PDF directly."""
+    if shutil.which("pdftotext"):
+        subprocess.run(["pdftotext", "-layout", pdf, txt], check=False)
+        return os.path.exists(txt)
+    try:
+        from pypdf import PdfReader
+        open(txt, "w").write("\f".join((pg.extract_text() or "") for pg in PdfReader(pdf).pages))
+        return True
+    except Exception:
+        return False
+
+
 def to_text(pdf, imgdir=None, min_total=0):
     txt = pdf[:-4] + ".txt"
-    subprocess.run(["pdftotext", "-layout", pdf, txt], check=False)
+    if not pdf_text(pdf, txt):
+        return "no text tool (install poppler-utils, or read the PDF directly)"
     n = os.path.getsize(txt) if os.path.exists(txt) else 0
     pages = max(1, open(txt, errors="replace").read().count("\f")) if n else 1
     if (n / pages < 300 or n < min_total) and imgdir:   # little text per page = scanned: render pages to read as images
         os.makedirs(imgdir, exist_ok=True)
         base = os.path.join(imgdir, os.path.basename(pdf)[:-4])
+        if not shutil.which("pdftoppm"):
+            return "scanned (read the PDF pages directly; pdftoppm not installed)"
         subprocess.run(["pdftoppm", "-r", "90", "-png", pdf, base], check=False)
         return "scanned -> " + imgdir
     return f"text {n} B"
@@ -131,8 +156,8 @@ def to_text(pdf, imgdir=None, min_total=0):
 
 def outline(pdf, width=110):
     txt = pdf[:-4] + ".txt"
-    if not os.path.exists(txt):
-        subprocess.run(["pdftotext", "-layout", pdf, txt], check=False)
+    if not os.path.exists(txt) and not pdf_text(pdf, txt):
+        return [f"(no text for {os.path.basename(pdf)}: read the PDF directly)"]
     pages = open(txt, encoding="utf-8", errors="replace").read().split("\f")
     norm = [[re.sub(r"\s+", " ", l).strip() for l in p.splitlines() if l.strip()] for p in pages]
     count = {}
@@ -421,6 +446,7 @@ def cmd_setup(query, n=10, extra_old=(), short=None):
               "4. predict.py . --type regular --label \"<Mon YYYY>\"", ""]
     open(os.path.join(D, "STATUS.md"), "w").write("\n".join(lines))
     print("\nWrote subject.json, papers.json (skeleton), STATUS.md in", D)
+    return D
 
 
 def _dl(url, path):

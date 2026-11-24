@@ -24,8 +24,7 @@ Method (v2, learned from the CN Nov 2026 paper; see README.md)
   6. Holdout: every current-course paper is re-forecast from earlier papers only and scored.
   7. Questions: times asked, current-course papers weighted course_boost, calibrated to the reuse rate.
 """
-import argparse, json, os, re, sys, datetime
-import numpy as np
+import argparse, json, math, os, random, re, statistics, sys, datetime   # standard library only
 
 LAMBDA = 0.7          # recency decay per paper
 SIM_THRESHOLD = 0.55  # average cosine similarity for two clusters to be the same question
@@ -72,45 +71,68 @@ def numbers(text):
 
 
 def similarity(qs):
+    """TF-IDF cosine similarity between all questions (sparse dicts, pure Python)."""
     docs = [tokens(q["text"]) for q in qs]
-    vocab = {w: i for i, w in enumerate(sorted({w for d in docs for w in d}))}
-    df = np.zeros(len(vocab))
+    n, df = len(docs), {}
     for d in docs:
         for w in set(d):
-            df[vocab[w]] += 1
-    idf = np.log((len(docs) + 1) / (df + 1)) + 1
-    M = np.zeros((len(docs), len(vocab)))
-    for i, d in enumerate(docs):
+            df[w] = df.get(w, 0) + 1
+    vecs = []
+    for d in docs:
+        v = {}
         for w in d:
-            M[i, vocab[w]] += 1
-        M[i] *= idf
-        M[i] /= np.linalg.norm(M[i]) or 1
-    return M @ M.T
+            v[w] = v.get(w, 0) + 1
+        for w in v:
+            v[w] *= math.log((n + 1) / (df[w] + 1)) + 1
+        norm = math.sqrt(sum(x * x for x in v.values())) or 1
+        vecs.append({w: x / norm for w, x in v.items()})
+    S = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i, n):
+            a, b = (vecs[i], vecs[j]) if len(vecs[i]) <= len(vecs[j]) else (vecs[j], vecs[i])
+            S[i][j] = S[j][i] = sum(x * b.get(w, 0.0) for w, x in a.items())
+    return S
 
 
 def cluster(qs, S):
-    clusters = [[i] for i in range(len(qs))]
+    """Average-linkage clustering with a topic constraint and a cannot-link rule (one paper per family).
+    Merging two clusters gives a weighted average of their similarities, so only pairs already above the
+    threshold can ever be merged: keep just those as candidates."""
+    n = len(qs)
+    members = {i: [i] for i in range(n)}
+    papers = {i: {qs[i]["paper"]} for i in range(n)}
+    tops = {i: set(qs[i]["topics"]) for i in range(n)}
+    tot = {}          # (a, b) with a < b -> sum of similarities between the two clusters
+    for i in range(n):
+        for j in range(i + 1, n):
+            if S[i][j] > SIM_THRESHOLD:
+                tot[(i, j)] = S[i][j]
     while True:
         best, pair = SIM_THRESHOLD, None
-        for a in range(len(clusters)):
-            pa = {qs[i]["paper"] for i in clusters[a]}
-            ta = {t for i in clusters[a] for t in qs[i]["topics"]}
-            for b in range(a + 1, len(clusters)):
-                if pa & {qs[i]["paper"] for i in clusters[b]}:
-                    continue
-                if not ta & {t for i in clusters[b] for t in qs[i]["topics"]}:
-                    continue
-                s = S[np.ix_(clusters[a], clusters[b])].mean()
-                if s > best:
-                    best, pair = s, (a, b)
+        for (a, b), t in tot.items():
+            avg = t / (len(members[a]) * len(members[b]))
+            if avg > best and not (papers[a] & papers[b]) and (tops[a] & tops[b]):
+                best, pair = avg, (a, b)
         if not pair:
             break
         a, b = pair
-        clusters[a] += clusters.pop(b)
-    for f, c in enumerate(clusters):
-        for i in c:
+        others = [c for c in members if c not in (a, b)]
+        for c in others:     # recompute sums for the merged cluster against every other cluster
+            t = sum(S[x][y] for x in members[a] + members[b] for y in members[c])
+            key_a = (min(a, c), max(a, c))
+            tot.pop((min(b, c), max(b, c)), None)
+            if t / ((len(members[a]) + len(members[b])) * len(members[c])) > SIM_THRESHOLD:
+                tot[key_a] = t
+            else:
+                tot.pop(key_a, None)
+        tot.pop((a, b), None)
+        members[a] += members.pop(b)
+        papers[a] |= papers.pop(b)
+        tops[a] |= tops.pop(b)
+    for f, (c, idx) in enumerate(sorted(members.items())):
+        for i in idx:
             qs[i]["fam"] = f
-    return len(clusters)
+    return len(members)
 
 
 def repeat_behaviour(papers, qs):
@@ -127,34 +149,88 @@ def repeat_behaviour(papers, qs):
 
 
 # ------------------------------------------------------------------ models
-def logreg(F, y, iters=5000, lr=0.5):
-    A = np.column_stack([np.ones(len(F)), F])
-    w = np.zeros(A.shape[1])
+def _solve(H, g):
+    """Solve H x = g by Gaussian elimination with partial pivoting."""
+    n = len(g)
+    M = [row[:] + [g[i]] for i, row in enumerate(H)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(M[r][c]))
+        M[c], M[p] = M[p], M[c]
+        if abs(M[c][c]) < 1e-12:
+            continue
+        for r in range(n):
+            if r != c and M[r][c]:
+                f = M[r][c] / M[c][c]
+                M[r] = [x - f * y for x, y in zip(M[r], M[c])]
+    return [M[i][n] / M[i][i] if abs(M[i][i]) > 1e-12 else 0.0 for i in range(n)]
+
+
+def _sig(z):
+    return 1 / (1 + math.exp(-max(-30.0, min(30.0, z))))
+
+
+def logreg(F, y, iters=30):
+    """L2-regularised logistic regression (bias not penalised), fitted with Newton's method."""
+    A = [[1.0] + list(r) for r in F]
+    d, n = len(A[0]), len(A)
+    w = [0.0] * d
     for _ in range(iters):
-        p = 1 / (1 + np.exp(-A @ w))
-        w -= lr * (A.T @ (p - y) / len(y) + L2 * np.r_[0, w[1:]])
+        g = [0.0] * d
+        H = [[0.0] * d for _ in range(d)]
+        for a, t in zip(A, y):
+            p = _sig(sum(wi * ai for wi, ai in zip(w, a)))
+            r, s_ = p - t, p * (1 - p)
+            for i in range(d):
+                g[i] += r * a[i]
+                si = s_ * a[i]
+                Hi = H[i]
+                for j in range(i, d):
+                    Hi[j] += si * a[j]
+        for i in range(d):
+            g[i] /= n
+            for j in range(i, d):
+                H[i][j] /= n
+                H[j][i] = H[i][j]
+            if i:
+                g[i] += L2 * w[i]
+                H[i][i] += L2
+        step = _solve(H, g)
+        w = [wi - si for wi, si in zip(w, step)]
+        if max(abs(x) for x in step) < 1e-9:
+            break
     return w
 
 
 def sigm(w, F):
-    return 1 / (1 + np.exp(-(np.column_stack([np.ones(len(F)), F]) @ w)))
+    return [_sig(w[0] + sum(wi * fi for wi, fi in zip(w[1:], r))) for r in F]
 
 
 def topic_feats(X, C, types, k, ttype):
-    x, c = X[:k], C[:k]
-    w = LAMBDA ** np.arange(k - 1, -1, -1)
+    """One feature row per topic, from papers < k."""
+    T = len(X[0]) if X else 0
+    w = [LAMBDA ** (k - 1 - i) for i in range(k)]
+    ws = sum(w)
     same = [i for i in range(k) if types[i] == ttype]
-    gap = np.array([min(k - 1 - np.nonzero(x[:, t])[0][-1], 4) / 4 if x[:, t].any() else 1.0 for t in range(x.shape[1])])
-    return np.column_stack([x.mean(0), (w[:, None] * x).sum(0) / w.sum(), x[-1],
-                            x[same[-1]] if same else x.mean(0), np.minimum(c.mean(0), 3) / 3, gap])
+    rows = []
+    for t in range(T):
+        col = [X[i][t] for i in range(k)]
+        asked = [i for i in range(k) if col[i]]
+        mean = sum(col) / k
+        rows.append([mean, sum(w[i] * col[i] for i in range(k)) / ws, col[-1], col[same[-1]] if same else mean,
+                     min(sum(C[i][t] for i in range(k)) / k, 3) / 3,
+                     min(k - 1 - asked[-1], 4) / 4 if asked else 1.0])
+    return rows
 
 
 def history_probs(X, C, types, k, ttype, keys):
     """Logistic topic model trained on papers 2..k-1, scoring paper k. None if fewer than 3 papers."""
     if k < 3:
         return None
-    wt = logreg(np.vstack([topic_feats(X, C, types, j, types[j]) for j in range(2, k)]),
-                np.concatenate([X[j] for j in range(2, k)]))
+    F, y = [], []
+    for j in range(2, k):
+        F += topic_feats(X, C, types, j, types[j])
+        y += list(X[j])
+    wt = logreg(F, y)
     return dict(zip(keys, sigm(wt, topic_feats(X, C, types, k, ttype))))
 
 
@@ -171,8 +247,11 @@ def notes_prior(topics, expected_topics):
     pos = [v for v in pages.values() if v > 0]
     if not pos:
         return {t: 0.5 for t in topics}
-    med = float(np.median(pos))
+    med = float(statistics.median(pos))
     raw = {t: min(2.5, (v / med) ** 0.5) for t, v in pages.items() if v > 0}
+    for t, m in topics.items():      # topics known only from a topics list (e.g. scanned notes): use its weight hint
+        if t not in raw and m.get("weight_hint"):
+            raw[t] = float(m["weight_hint"]); pages[t] = -1
     base = expected_topics / sum(raw.values())
     out = {}
     for t, m in topics.items():
@@ -239,8 +318,8 @@ def expected_topics(cfg, papers, qs, upto):
     subq = cfg["pattern"]["subq"]
     if not old:
         return 0.85 * subq
-    d = np.mean([len({t for q in qs if q["paper"] == i for t in q["topics"]}) for i in old])
-    n = np.mean([sum(1 for q in qs if q["paper"] == i) for i in old])
+    d = statistics.mean([len({t for q in qs if q["paper"] == i for t in q["topics"]}) for i in old])
+    n = statistics.mean([sum(1 for q in qs if q["paper"] == i) for i in old])
     return float(d * subq / n)
 
 
@@ -258,9 +337,9 @@ def holdout(cfg, papers, topics, qs, X, C, types, keys, h, modules):
     out = {"paper": papers[h]["label"], "curves": {}}
     for name, order in variants.items():
         out["curves"][name] = {str(K): attainable(pq, covers(set(order[:K]))) for K in grid}
-    rng = np.random.default_rng(0)
-    out["curves"]["random"] = {str(K): float(np.mean([attainable(pq, covers(set(rng.choice(list(topics), min(K, len(topics)), replace=False))))
-                                                      for _ in range(300)])) for K in grid}
+    rng = random.Random(0)
+    out["curves"]["random"] = {str(K): statistics.mean([attainable(pq, covers(set(rng.sample(sorted(topics), min(K, len(topics))))))
+                                                         for _ in range(300)]) for K in grid}
     return out
 
 
@@ -280,10 +359,10 @@ def main():
     assert not bad, f"papers.json uses topic keys missing from topics.json: {sorted(bad)}"
     P = len(papers)
     types = [p["type"] for p in papers]
-    X = np.zeros((P, len(keys))); C = np.zeros((P, len(keys)))
+    X = [[0.0] * len(keys) for _ in range(P)]; C = [[0.0] * len(keys) for _ in range(P)]
     for q in qs:
         for t in q["topics"]:
-            X[q["paper"], keys.index(t)] = 1; C[q["paper"], keys.index(t)] += 1
+            X[q["paper"]][keys.index(t)] = 1.0; C[q["paper"]][keys.index(t)] += 1
     n_fam = 0
     if qs:
         n_fam = cluster(qs, similarity(qs))
@@ -295,10 +374,10 @@ def main():
         pq = [q for q in qs if q["paper"] == k]
         p_k = history_probs(X, C, types, k, types[k], keys)
         order = sorted(keys, key=lambda t: -p_k[t])
-        rng = np.random.default_rng(k)
+        rng = random.Random(k)
         rows.append({"paper": papers[k]["label"], "course": papers[k]["course"],
                      "curve": {str(K): attainable(pq, covers(set(order[:K]))) for K in CURVE_K},
-                     "random": {str(K): float(np.mean([attainable(pq, covers(set(rng.choice(keys, min(K, len(keys)), replace=False))))
+                     "random": {str(K): float(statistics.mean([attainable(pq, covers(set(rng.sample(keys, min(K, len(keys))))))
                                                        for _ in range(200)])) for K in CURVE_K}})
     holdouts = [holdout(cfg, papers, topics, qs, X, C, types, keys, h, modules)
                 for h in range(3, P) if papers[h]["course"] == cfg["code"]]
@@ -325,7 +404,7 @@ def main():
         best, bt = -1.0, None
         for t in fam_topics[f]:
             i = keys.index(t)
-            qpp = C[:, i].sum() / max(X[:, i].sum(), 1)
+            qpp = sum(r[i] for r in C) / max(sum(r[i] for r in X), 1)
             v = adj[t]["p"] * qpp * wtimes[f] / tot[t]
             if v > best:
                 best, bt = v, t
@@ -366,15 +445,15 @@ def main():
 
     bt_curve = {}
     if rows:
-        bt_curve = {str(K): {"mean": float(np.mean([r["curve"][str(K)] for r in rows])),
-                             "worst": float(np.min([r["curve"][str(K)] for r in rows])),
-                             "random": float(np.mean([r["random"][str(K)] for r in rows]))} for K in CURVE_K}
+        bt_curve = {str(K): {"mean": statistics.mean([r["curve"][str(K)] for r in rows]),
+                             "worst": min(r["curve"][str(K)] for r in rows),
+                             "random": statistics.mean([r["random"][str(K)] for r in rows])} for K in CURVE_K}
     out = {"generated": datetime.date.today().isoformat(), "subject": {k: cfg[k] for k in ("code", "name") if k in cfg},
            "target": target, "papers": [{"id": p["id"], "label": p["label"], "type": p["type"], "course": p["course"]} for p in papers],
            "n_questions": len(qs), "n_families": n_fam, "alpha_history": cfg.get("alpha_history", 0.25) if p_hist is not None else 0.0,
            "behaviour": behaviour, "backtest": bt_curve, "holdout": holdouts,
            "topics": [{"rank": i + 1, "key": t, "name": topics[t]["name"], "module": topics[t]["module"],
-                       "notes": topics[t].get("notes", []), "asked": int(X[:, keys.index(t)].sum()) if P else 0, **adj[t]}
+                       "notes": topics[t].get("notes", []), "asked": int(sum(r[keys.index(t)] for r in X)) if P else 0, **adj[t]}
                       for i, t in enumerate(order)],
            "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper}
     json.dump(out, open(os.path.join(D, "results.json"), "w"), indent=1, ensure_ascii=False)

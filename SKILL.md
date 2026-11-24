@@ -1,113 +1,98 @@
 ---
 name: ktu-exam-predictor
-description: Predict the important topics and likely questions for any KTU B.Tech exam from a course code or name (e.g. "PCCST502", "DAA", "machine learning", "microcontrollers"). It downloads about 10 past papers (current course + older-scheme versions) and the ktunotes module notes, extracts the questions, forecasts with a method checked against a real paper, and teaches the result. Use this whenever the user mentions a KTU subject together with exams, PYQs or previous-year questions, important topics, "what will come", a study plan before an exam, a supplementary/supply exam, or exam prediction, even if they don't say "predict".
+description: Predict the important topics and likely questions for any KTU B.Tech exam from a course code or name (e.g. "PCCST502", "DAA", "machine learning", "microcontrollers"). One command downloads about 10 past papers (current course + older-scheme versions) and the ktunotes module notes, extracts and tags the questions, and writes a forecast checked against a real paper; then teach the result. Use this whenever the user mentions a KTU subject together with exams, PYQs or previous-year questions, important topics, "what will come", a study plan before an exam, a supplementary/supply exam, or exam prediction, even if they don't say "predict".
 ---
 
 # KTU exam predictor
 
-You get a course code or name, and sometimes the exam date or a number of papers. Turn it into a forecast the student can study from: which topics matter, in what order, with every past version of each question and worked answers.
+You get a course code or name, and sometimes an exam date or a paper count. Produce a forecast the student can study from: which topics matter, in what order, with every past version of each question. Then teach it.
 
-**Scripts:** the `scripts/` folder next to this SKILL.md. Call it `$S`. Its location depends on how the skill was installed, e.g. `~/.claude/skills/ktu-exam-predictor/scripts` (global) or `.claude/skills/ktu-exam-predictor/scripts` (project). Use the base directory you were given when this skill loaded. Needs Python 3 with numpy, and poppler-utils.
-- `fetch.py`: finds the course, downloads papers and notes, sets up the folder.
-- `extract_questions.py`: drafts the questions from the downloaded papers.
-- `predict.py`: produces the forecast.
+**Scripts:** the `scripts/` folder next to this SKILL.md. Call it `$S`; use the base directory you were given when the skill loaded.
+- **No installs needed:** they use only the Python 3 standard library.
+- **poppler-utils** (`pdftotext`, `pdftoppm`) is optional. It improves PDF text; without it, read PDFs with your own file-reading tool.
 
-**Subject data:** `~/Documents/Study Materials/<SHORT>/predictor/` (change the root with the `KTU_STUDY_DIR` environment variable).
-
-**Before you start, read:**
-- `references/student.md`, if it exists: who the student is, how they study, their exam calendar and what is already set up. It is a private, local file; `references/student.example.md` shows its format. If it is missing, ask the student for their course, exam date and how they like to study.
-- `references/lessons.md`: why notes come first. A forecast built only from old papers missed 14 of 60 marks on a real paper.
-
-## Choose the mode by time left
-
-- **Full mode (more than 3 days, or no date given):** steps 1–5 below, then teach.
-- **Quick mode (3 days or less):** the student needs to start studying within the hour.
-  1. Run step 1 (setup) and step 2 (extraction).
-  2. Give a first study order straight away from the notes and the extracted questions:
-     - list each module's sections
-     - mark the ones whose wording recurs across papers, using `pyq/*.txt`
-     - add the notes' worked examples and numericals
-  3. Start teaching module by module.
-  4. Hand steps 3–5 to a background subagent, if your agent can run one, with the subject folder path and this skill's path. Otherwise do them between teaching sessions. When its `FORECAST.md` arrives, adjust the remaining order and say what changed.
-
-Covering every module matters more than perfect ranking, because each module carries the same marks.
-
-## Step 1: set up (resolve, fetch, create folder)
+## 1. Run the pipeline (one command, about a minute)
 
 ```bash
-python3 $S/fetch.py resolve "<code or name>"      # check the course and predecessors it picked
-python3 $S/fetch.py setup "<code or name>" --papers 10 [--old CODE] [--short NAME]
+python3 $S/ktu.py prepare "<code or name>" --label "<Mon YYYY>"     # add --type supplementary for supply exams
 ```
 
-`setup` does the following:
-- matches the input to the ktunotes catalogue by code, short name or name
-- adds older-scheme predecessors (similar name and next to it in the catalogue, e.g. PCCST502 → CST306)
-- downloads the N most recent distinct exams: current course first, then 2019-scheme papers, then 2015-scheme ones only if needed
-- downloads the typed notes and writes `notes/OUTLINE.txt` (scans go to `notes/img/`)
-- writes `subject.json`, a `papers.json` skeleton and `STATUS.md`
+It does the following, printing what it did at each step:
+1. Finds the course and its older-scheme versions (e.g. PCCST502 → CST306).
+2. Downloads the 10 most recent distinct papers and the ktunotes notes.
+3. Drafts every question with its marks.
+4. Drafts topics from the notes' sections (from the ktunotes topic list for modules whose notes are scans).
+5. Auto-tags questions to topics.
+6. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`).
+   - The study dir is `$KTU_STUDY_DIR`, else `~/Documents/Study Materials` if it exists, else `~/KTU Exams`.
 
-**Check the predecessors in the resolve output.** A course with a similar name but different content (an ECE version, say) adds noise. Rerun with `--old` or drop those papers. If no notes folder exists, use the student's own PDFs or `https://topics.ktunotes.live/<code>`.
+**Check the course and predecessors it printed.** A similarly named course with different content (an ECE version, say) adds noise. Rerun with `--old CODE` to force a predecessor, then delete the wrong papers from `papers.json` and `pyq/`.
 
-## Step 2: extract questions (script drafts, you finish)
+## 2. Read the forecast and the status
 
 ```bash
-python3 $S/extract_questions.py ~/Documents/"Study Materials"/<SHORT>/predictor          # draft
-python3 $S/extract_questions.py ~/Documents/"Study Materials"/<SHORT>/predictor --check  # validate after fixing
+python3 $S/ktu.py status "<code or name>"
 ```
 
-The script splits each paper's OCR text into sub-questions (`A1`, `B11a`, …) with marks and text. It rebuilds the numbering from the marks column, the a)/b) labels and the Module/OR markers, because OCR mangles printed numbers. It also marks the same exam saved under two names as `duplicate_of`; `predict.py` skips those.
+Open `FORECAST.md`. It contains:
+- the module-balanced study order, with notes pages
+- the likely-repeat questions
+- an assembled likely paper
 
-**Expect most KTU papers to need finishing by you.** In testing, about 1 in 10 real papers came out fully clean, and most drafts missed or merged one or two questions. The script saves time on layout; reading noisy OCR is something you do better.
+`status` lists what is still automatic-quality:
+- papers whose drafts failed the KTU marks check, or that are scans with no questions
+- low-confidence tags
+- modules whose notes are scans
 
-For each paper marked `review` or `SCANNED` in `pyq/EXTRACTION.md`:
-1. Open its `.txt`, or its pages in `pyq/img/`.
-2. Correct or write `questions[]` in `papers.json`, keeping the paper's own numbering.
-3. Run `--check` until every paper passes. It checks the KTU pattern (2019 scheme: 10 × 3 + 14-mark Part B questions; 2024 scheme: 8 × 3 + 9-mark ones), duplicate ids and empty text, so a mis-transcribed paper can't slip through.
+## 3. Improve it if there is time (optional, each fix helps)
 
-With several papers to fix, give 2–3 papers each to parallel subagents. Pass each one the paper paths, the question format and the `--check` command.
+**What is accurate as-is.** On the one real paper checked, notes-section topics with automatic tags covered **about 85% of the marks** when studying the top 57% of topics (random: 63%). Hand-checked topics and tags reached 90%.
 
-2015-scheme papers (CSxxx codes) have a different layout. Skip them if there are enough 2019 and 2024 papers.
+**What to fix, highest value first.** Re-run `python3 $S/ktu.py predict "<course>"` after any of these:
+1. **Scanned papers** (no questions):
+   - read `pyq/img/*.png` or the PDF
+   - write `questions[]` in `papers.json`: `{"q": "A1"|"B11a", "marks": 3, "topics": [], "text": "..."}`
+   - run `python3 $S/ktu.py autotag "<course>"`
+2. **Papers that failed the marks check** (`pyq/EXTRACTION.md`):
+   - correct them in `papers.json`
+   - validate with `python3 $S/extract_questions.py <subject dir> --check`
+   - The check uses the KTU pattern. 2019 scheme: 10 × 3 marks, plus 14-mark Part B questions. 2024 scheme: 8 × 3 marks, plus 9-mark questions.
+3. **Topics:**
+   - Merge or rename odd notes-section topics in `topics.json`.
+   - Add topics for scanned-notes modules from `notes/img/`.
+   - Set `"model": true` for topics in the official model paper (`https://model.ktunotes.live/<code>`).
+   - Fine-grained topics (one per notes section) are what make the ranking accurate.
+4. **Low-confidence tags:** fix `topics` on questions with a low `tag_score`.
 
-## Step 3: topics.json, built from the notes
+With several papers to fix, use parallel subagents if your agent supports them: 2–3 papers each, with the paper paths, the question format and the `--check` command.
 
-Make one topic per section of the current notes, using `notes/OUTLINE.txt` and the images for scanned modules. This is where the CN forecast went wrong: topics built from old papers can't see new-syllabus material.
+## 4. Teach
 
-```json
-{"topics": {"MERGE_SORT": {"name": "Merge sort and its analysis", "module": 2, "syllabus": "in",
-                           "model": true, "notes": ["M2:14-18"]}}}
-```
+In order of priority:
+1. **The study order, module by module.** Each 2024-scheme module carries the same marks (15 of 60), so cover every module.
+2. **Every past version of each top topic's questions.** Exact wording rarely repeats; topics and textbook examples do.
+3. **Worked answers for numericals and the notes' own examples.** Compute them where possible.
+4. **The likely paper**, labelled as a guess.
 
-- **`model: true`:** the topic is in the official model paper (`https://model.ktunotes.live/<code>`, or a MODEL folder from `fetch.py list-notes <CODE>`).
-- **`syllabus: old`:** the topic is predecessor-only and absent from the notes.
-- **The paper pattern:** if the model paper shows a pattern other than 8 × 3 + 4 × 9, update `pattern` in `subject.json`. PBCST courses may differ.
+Go topic by topic, and let the student say "next" to move on. If your agent can publish pages (e.g. Claude's Artifact tool), offer a study page with the forecast and an answer under each question.
 
-## Step 4: tag topics, then predict
+**Report accuracy as measured** ("on one real paper, the top 30–35 topics covered about 80–90% of marks"), never as a promise. A student who trusts an inflated number and stops studying early can fail.
 
-1. In `papers.json`, give every sub-question all the topic keys it needs. `predict.py` refuses untagged questions, so a silent gap can't distort the forecast.
-2. Run:
+## Time left decides the order
 
-```bash
-python3 $S/predict.py ~/Documents/"Study Materials"/<SHORT>/predictor --type regular --label "<Mon YYYY>"
-```
+**3 days or less:**
+1. Run step 1.
+2. Start teaching from `FORECAST.md` within minutes.
+3. Do step 3's fixes between topics, or hand them to a background subagent.
 
-Use `--type supplementary` for supply exams. Their reuse rates differ.
+**More time:** do step 3 first, then teach.
 
-## Step 5: deliver and teach
+## Before you start
 
-Read `FORECAST.md`, then give, in order of priority:
-1. **The module-balanced study order**, with notes page numbers. Each module's top topics come first.
-2. **Every past version of each top topic's question.** Exact wording rarely repeats, but the topic and its textbook example do.
-3. **Worked answers** for numericals and the notes' own examples, checked by computing them where possible.
-4. **The assembled likely paper**, labelled as a guess.
+- **Read `references/lessons.md`.** A forecast built only from old papers missed 14 of 60 marks; notes-first fixed it.
+- **Read `references/student.md` if it exists.** It is private and local: the student's courses, exam dates and how they like to study (`references/student.example.md` shows the format). If it is missing, ask for the exam date and how much time they have.
 
-If the student wants a page to study from and your agent can publish pages (e.g. Claude's Artifact tool), build one: forecast, likely questions, and an answer under each question.
-
-Then teach topic by topic. The student says "next" to move on.
-
-Report accuracy honestly, for example: "on the one real paper checked, the top 30–35 topics covered about 80–90% of marks". A student who trusts an inflated number and stops studying early can fail, so overclaiming does real harm.
-
-## After the real exam
-
-1. Add the paper to `papers.json` with `"course": "<current code>"`.
-2. Rerun `predict.py`. A holdout table appears, comparing history only, notes only and the blend.
-3. Write `<SHORT>/FINDINGS.md`, and update `references/lessons.md` if something new was learned.
+**After the real exam:**
+1. Add it to `papers.json` with `"course": "<current code>"`.
+2. Run `ktu.py predict`. A holdout table shows how each method would have done.
+3. Note what you learned in `references/lessons.md`.
