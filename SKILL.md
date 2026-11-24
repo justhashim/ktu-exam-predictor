@@ -48,27 +48,25 @@ python3 $S/fetch.py setup "<code or name>" --papers 10 [--old CODE] [--short NAM
 
 **Check the predecessors in the resolve output.** A course with a similar name but different content (an ECE version, say) adds noise. Rerun with `--old` or drop those papers. If no notes folder exists, use the student's own PDFs or `https://topics.ktunotes.live/<code>`.
 
-## Step 2: extract questions
+## Step 2: extract questions (script drafts, you finish)
 
 ```bash
-python3 $S/extract_questions.py ~/Documents/"Study Materials"/<SHORT>/predictor
+python3 $S/extract_questions.py ~/Documents/"Study Materials"/<SHORT>/predictor          # draft
+python3 $S/extract_questions.py ~/Documents/"Study Materials"/<SHORT>/predictor --check  # validate after fixing
 ```
 
-This splits every paper's text into sub-questions (`A1`, `B11a`, …) with marks and text. It rebuilds the numbering from the marks column, the a)/b) labels and the Module/OR markers, because OCR mangles printed numbers.
+The script splits each paper's OCR text into sub-questions (`A1`, `B11a`, …) with marks and text. It rebuilds the numbering from the marks column, the a)/b) labels and the Module/OR markers, because OCR mangles printed numbers. It also marks the same exam saved under two names as `duplicate_of`; `predict.py` skips those.
 
-It then checks each paper against the KTU pattern:
-- 2019 scheme: 10 × 3 marks, and 14 marks per Part B question
-- 2024 scheme: 8 × 3 marks, and 9 marks per Part B question
+**Expect most KTU papers to need finishing by you.** In testing, about 1 in 10 real papers came out fully clean, and most drafts missed or merged one or two questions. The script saves time on layout; reading noisy OCR is something you do better.
 
-Results are written to `pyq/EXTRACTION.md`:
-- **`ok`:** the numbering and marks match. Skim the text and fix OCR typos in key terms.
-- **`review`:** correct the paper from its PDF text or `pyq/img/*.png`. Keep the paper's own numbering.
-- **`SCANNED`:** transcribe the paper from the page images.
-- **`duplicate_of`:** the same exam saved twice. `predict.py` skips it.
+For each paper marked `review` or `SCANNED` in `pyq/EXTRACTION.md`:
+1. Open its `.txt`, or its pages in `pyq/img/`.
+2. Correct or write `questions[]` in `papers.json`, keeping the paper's own numbering.
+3. Run `--check` until every paper passes. It checks the KTU pattern (2019 scheme: 10 × 3 + 14-mark Part B questions; 2024 scheme: 8 × 3 + 9-mark ones), duplicate ids and empty text, so a mis-transcribed paper can't slip through.
 
-2015-scheme papers (CSxxx codes) have a different layout and usually need review. Skip them if there are enough 2019 and 2024 papers.
+With several papers to fix, give 2–3 papers each to parallel subagents. Pass each one the paper paths, the question format and the `--check` command.
 
-If several papers need transcription, split them across parallel subagents (2–3 papers each). Give each one the path, the format and the topic list, then check their work.
+2015-scheme papers (CSxxx codes) have a different layout. Skip them if there are enough 2019 and 2024 papers.
 
 ## Step 3: topics.json, built from the notes
 

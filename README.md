@@ -26,7 +26,7 @@ The scripts also run on their own, without Claude.
 
 - **Any course, by code or name.** `PCCST502`, `DAA` and `design and analysis of algorithms` all resolve to the same course. Older-scheme versions are found automatically (PCCST502 → CST306).
 - **One-step fetch.** Downloads the most recent distinct exam papers and the typed notes from [ktunotes.live](https://ktunotes.live). Scanned papers and notes are rendered to page images.
-- **Question extraction from noisy OCR.** Splits papers into `A1`, `B11a`, … with marks. Numbering is rebuilt from the marks column and the Module/OR markers, and each paper is checked against the KTU pattern, so broken pages get flagged instead of silently trusted.
+- **Question drafting and validation.** Drafts `A1`, `B11a`, … with marks from noisy OCR, detects the same exam saved twice, and checks every paper against the KTU marks pattern (`--check`). Broken pages get flagged instead of silently trusted. Claude finishes the flagged papers.
 - **Notes-first forecasting.** Topics come from the sections of the current notes and are blended with past-paper history. This fixes the biggest weakness of past-paper-only prediction (see [Accuracy](#accuracy)).
 - **Module-balanced study order.** Each module carries equal marks, so the plan never leaves a whole module uncovered.
 - **Likely questions, with every past wording.** Questions are ranked by reuse, with current-scheme papers weighted higher. There is also an assembled "likely paper".
@@ -110,7 +110,9 @@ S=~/.claude/skills/ktu-exam-predictor/scripts
 
 python3 $S/fetch.py resolve "machine learning"        # which course and predecessors it finds
 python3 $S/fetch.py setup "machine learning" --papers 10
-python3 $S/extract_questions.py ~/Documents/"Study Materials"/ML/predictor
+python3 $S/extract_questions.py ~/Documents/"Study Materials"/ML/predictor          # drafts; see pyq/EXTRACTION.md
+# fix the papers marked review/SCANNED in papers.json, then validate:
+python3 $S/extract_questions.py ~/Documents/"Study Materials"/ML/predictor --check
 # write topics.json from notes/OUTLINE.txt and tag each question's topics in papers.json, then:
 python3 $S/predict.py ~/Documents/"Study Materials"/ML/predictor --type regular --label "Dec 2026"
 ```
@@ -147,6 +149,9 @@ What that check showed:
 - **The setter worked from the new notes and the textbook.** Every question was in the notes, several as the textbook's own worked examples.
 - **About half the questions were reworded old-course questions.**
 - **Past-paper-only prediction missed** topics that were new to the syllabus.
+
+> [!IMPORTANT]
+> Question extraction is a drafting aid. On real KTU scans, most papers need a short manual or Claude-assisted fix before `--check` passes.
 
 > [!WARNING]
 > The weights were tuned on that same single paper, so expect less on new papers. Predicting exact question wording is weak; the value is in knowing which **topics** to cover, and in covering every module. No forecast replaces studying the notes.

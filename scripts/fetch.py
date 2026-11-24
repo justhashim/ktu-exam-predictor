@@ -258,7 +258,7 @@ def name_sim(a, b):
     if not A or not B:
         return 0.0
     j = len(A & B) / len(A | B)
-    return max(j, 0.8 if (A <= B or B <= A) else 0.0)
+    return j   # Jaccard on stemmed name words ("Python for Machine Learning" vs "Machine Learning" = 0.67)
 
 
 def is_old_code(code):
@@ -295,10 +295,10 @@ def resolve(query, extra_old=()):
                 if is_old_code(nb["code"]) and name_sim(name, nb["name"]) >= 0.3:
                     cands[nb["code"]] = max(cands.get(nb["code"], 0), name_sim(name, nb["name"]) + 0.3)
     for c in cat:
-        if is_old_code(c["code"]) and name_sim(name, c["name"]) >= 0.5:
+        if is_old_code(c["code"]) and name_sim(name, c["name"]) >= 0.75:
             cands[c["code"]] = max(cands.get(c["code"], 0), name_sim(name, c["name"]) + (0.1 if c["branch"] == "CSE" else 0))
     for oc, a in avail.items():
-        if is_old_code(oc) and name_sim(name, a["name"]) >= 0.5:
+        if is_old_code(oc) and name_sim(name, a["name"]) >= 0.75:
             cands[oc] = max(cands.get(oc, 0), name_sim(name, a["name"]))
     for oc in extra_old:
         cands[oc.upper()] = 9.9

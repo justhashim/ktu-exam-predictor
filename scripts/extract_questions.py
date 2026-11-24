@@ -3,7 +3,8 @@
 Split KTU past papers (pdftotext output) into sub-questions with ids, marks and text, and fill the
 questions[] of each paper in SUBJECT_DIR/papers.json. Topic tags are left empty for the model to add.
 
-  python3 extract_questions.py SUBJECT_DIR [--force]
+  python3 extract_questions.py SUBJECT_DIR [--force]   draft questions for papers that have none (--force: redo drafts)
+  python3 extract_questions.py SUBJECT_DIR --check     only validate papers.json (after fixing or transcribing papers)
 
 Works on the noisy OCR text of scanned-then-OCR'd KTU papers: it does not trust printed question numbers.
 It uses the marks column "(7)" at the end of a line, "a)/b)/c)" labels and the "Module" / "OR" markers to
@@ -17,7 +18,8 @@ SUBJECT_DIR/pyq/EXTRACTION.md, so they can be corrected from the PDF or the page
 """
 import json, os, re, sys
 
-MARK = re.compile(r"^(?P<body>.*?)\s*\(\s*(?P<m>\d{1,2})\s*[)\]}\\|1l]?\s*$")
+MARK = re.compile(r"^(?P<body>.*?)\s*[({\[]\s*(?P<m>\d{1,2})\s*[)\]}\\|1l]?\s*$")
+MARK_BARE = re.compile(r"^(?P<body>.*?\S)?\s{4,}(?P<m>\d{1,2})\s*$")        # marks column without brackets: "...    3"
 SUBLBL = re.compile(r"^\s*(?:[0-9IlLtTi|]{1,3}\s*)?(?P<l>[a-c])\s*(?:\)|[l|1](?=\s))\s*")
 NUMLEAD = re.compile(r"^\s*(?P<n>[0-9IlLtTi|oO](?:\s?[0-9IlLtTi|oO]){0,2})\s*(?:[.)]\s*|\s+)(?=\S)")
 STOP_AT = re.compile(r"(?i)important topics|click here to visit|click the logo")
@@ -35,13 +37,17 @@ def ocr_num(tok):
 def clean_lines(text):
     out = []
     for raw in text.replace("\f", "\n").splitlines():
-        if STOP_AT.search(raw) and out:
-            break
+        if STOP_AT.search(raw) and any(re.fullmatch(r"(?i)\s*PART\s*[B8]\s*", x) for x in out):
+            break                                   # ktunotes pages appended after the paper
         s = raw.rstrip()
         if not s.strip():
             continue
         if MARKER.match(s):
             out.append(s); continue
+        if re.search(r"(?i)an[sv]wer\s+[ao]ll\s+questions", s):     # papers without PART headings
+            out.append("PART A"); continue
+        if re.search(r"(?i)an[sv]wer\s+any\s+one\s*full", s):
+            out.append("PART B"); continue
         if NOISE.search(s) or not re.search(r"[A-Za-z0-9]{2}", s):   # headers, footers, OCR specks
             continue
         out.append(s)
@@ -66,7 +72,7 @@ def starts_question(x, part):
     return bool(SUBLBL.match(x) or re.match(r"^\s*[0-9IlLt]{1,2}\s*[a-c]?\s*[.)]?\s+[A-Za-z]", x))
 
 
-def collect(lines, part):
+def collect(lines, part, bare=False):
     """Group lines into items, one per marks tag "(7)". A question usually starts on its marks line (KTU prints
     marks on the first line); lines between two marks lines belong to the previous question unless one of them
     visibly starts the next question (a number or, in Part B, a sub-part label)."""
@@ -82,9 +88,9 @@ def collect(lines, part):
             items.append({"marker": "or" if "or" in l.lower() and "mod" not in l.lower() else "module"})
             last = None
             continue
-        m = MARK.match(l)
+        m = MARK.match(l) or (MARK_BARE.match(l) if bare else None)
         if m and 1 <= int(m.group("m")) <= 20:
-            body = re.sub(r"\s+\d\s*$", "", m.group("body"))          # drop a CO column ("... 1 (5)")
+            body = re.sub(r"\s+\d\s*$", "", m.group("body") or "")          # drop a CO column ("... 1 (5)")
             pre, k = buf, None
             if not starts_question(body, part) or not body.strip():
                 k = next((i for i, x in enumerate(pre) if starts_question(x, part)), None)
@@ -166,8 +172,32 @@ def check(qs):
     return scheme, probs
 
 
+def check_only(D):
+    P = json.load(open(os.path.join(D, "papers.json")))
+    bad = 0
+    for p in P["papers"]:
+        if p.get("duplicate_of"):
+            print(f"  {p['label']:24s} duplicate of {p['duplicate_of']} (skipped)"); continue
+        qs = p.get("questions", [])
+        if not qs:
+            print(f"  {p['label']:24s} NO QUESTIONS"); bad += 1; continue
+        scheme, probs = check(qs)
+        ids = [q["q"] for q in qs]
+        probs += [f"duplicate id {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]
+        probs += [f"{q['q']} has no text" for q in qs if len(q.get("text", "").strip()) < 8]
+        untagged = sum(1 for q in qs if not q.get("topics"))
+        p["extract_status"] = "ok" if not probs else "review: " + "; ".join(probs)
+        bad += bool(probs)
+        print(f"  {p['label']:24s} {len(qs):2d} sub-questions, {scheme} scheme, {p['extract_status']}"
+              + (f", {untagged} untagged" if untagged else ""))
+    json.dump(P, open(os.path.join(D, "papers.json"), "w"), indent=1, ensure_ascii=False)
+    print("all papers pass" if not bad else f"{bad} paper(s) still need fixing")
+
+
 def main():
     D = sys.argv[1]
+    if "--check" in sys.argv:
+        return check_only(D)
     force = "--force" in sys.argv
     pj = os.path.join(D, "papers.json")
     P = json.load(open(pj))
@@ -190,7 +220,8 @@ def main():
             p.update({"questions": [], "auto": True, "extract_status": "review: PART A/PART B headings not found"})
             report.append(f"- **{p['label']}**: PART A / PART B headings not found -> transcribe by hand")
             continue
-        qs = number(collect(a, "A"), collect(b, "B"))
+        bare = sum(bool(MARK.match(l)) for l in a + b) < 5      # this paper prints marks without brackets
+        qs = number(collect(a, "A", bare), collect(b, "B", bare))
         scheme, probs = check(qs)
         st = "ok" if not probs else "review: " + "; ".join(probs)
         p.update({"questions": qs, "auto": True, "scheme": scheme, "extract_status": st})
