@@ -21,8 +21,11 @@ It does the following, printing what it did at each step:
 1. Finds the course and its older-scheme versions (e.g. PCCST502 → CST306).
 2. Downloads the 10 most recent distinct papers and the ktunotes notes.
 3. Drafts every question with its marks.
-4. Drafts topics from the notes' sections (from the ktunotes topic list for modules whose notes are scans).
-5. Auto-tags questions to topics.
+4. Drafts topics:
+   - the ktunotes important-topics list
+   - plus notes sections that list misses
+   - plus an "off-syllabus" bucket for old-course questions that match nothing
+5. Auto-tags questions to topics, and splits topics that are too coarse into subtopics built from groups of similar past questions.
 6. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`).
    - The study dir is `$KTU_STUDY_DIR`, else `~/Documents/Study Materials` if it exists, else `~/KTU Exams`.
 
@@ -46,7 +49,11 @@ Open `FORECAST.md`. It contains:
 
 ## 3. Improve it if there is time (optional, each fix helps)
 
-**What is accurate as-is.** On the one real paper checked, notes-section topics with automatic tags covered **about 85% of the marks** when studying the top 57% of topics (random: 63%). Hand-checked topics and tags reached 90%.
+**What is accurate as-is.** Tested on one real paper (CN, Nov 2026), scored on hand-checked tags and measured by share of the syllabus studied:
+- The automatic forecast beat random topic choice by about **15 points at 40% of the syllabus** and **24 points at 60%** (50% vs 35%, and 73% vs 49% of marks).
+- Hand-built topics and tags beat random by 25–26 points.
+
+So the automatic version is useful but not as good as a checked one. `FORECAST.md` warns when a module's ranking is too flat to trust.
 
 **What to fix, highest value first.** Re-run `python3 $S/ktu.py predict "<course>"` after any of these:
 1. **Scanned papers** (no questions):
@@ -61,7 +68,7 @@ Open `FORECAST.md`. It contains:
    - Merge or rename odd notes-section topics in `topics.json`.
    - Add topics for scanned-notes modules from `notes/img/`.
    - Set `"model": true` for topics in the official model paper (`https://model.ktunotes.live/<code>`).
-   - Fine-grained topics (one per notes section) are what make the ranking accurate.
+   - Questions tagged `OFF_SYLLABUS` were judged outside the current syllabus. Move any that belong to a real topic.
 4. **Low-confidence tags:** fix `topics` on questions with a low `tag_score`.
 
 With several papers to fix, use parallel subagents if your agent supports them: 2–3 papers each, with the paper paths, the question format and the `--check` command.
@@ -76,7 +83,7 @@ In order of priority:
 
 Go topic by topic, and let the student say "next" to move on. If your agent can publish pages (e.g. Claude's Artifact tool), offer a study page with the forecast and an answer under each question.
 
-**Report accuracy as measured** ("on one real paper, the top 30–35 topics covered about 80–90% of marks"), never as a promise. A student who trusts an inflated number and stops studying early can fail.
+**Report accuracy as measured** ("on one real paper, studying the top 40% of the syllabus covered about half the marks, against about a third for random choice"), never as a promise. A student who trusts an inflated number and stops studying early can fail.
 
 ## Time left decides the order
 
@@ -89,7 +96,7 @@ Go topic by topic, and let the student say "next" to move on. If your agent can 
 
 ## Before you start
 
-- **Read `references/lessons.md`.** A forecast built only from old papers missed 14 of 60 marks; notes-first fixed it.
+- **Read `references/lessons.md`.** A forecast built only from old papers missed 14 of 60 marks. Topics must cover the current syllabus, and accuracy must be measured fairly.
 - **Read `references/student.md` if it exists.** It is private and local: the student's courses, exam dates and how they like to study (`references/student.example.md` shows the format). If it is missing, ask for the exam date and how much time they have.
 
 **After the real exam:**

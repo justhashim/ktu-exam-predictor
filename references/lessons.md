@@ -24,3 +24,8 @@ If the local study folder has one, the full record is in `<study dir>/CNW/FINDIN
 3. **Balance the modules.** Each 2024-scheme module carries 15 of the 60 marks (two Part A questions plus one Part B choice).
 4. **State accuracy as measured** ("about 80–90% of marks if you cover the top 30–35 topics; this was tested on one paper"). Never "90% guaranteed".
 5. **Time is the main limit.** Help the student start early, and put the topics with the most marks first.
+
+**Later checks (automatic pipeline), scored on hand-checked tags by share of the syllabus:**
+- **Ranking by topic count flattered coarse topic lists.** With 17 topics, "top 25" meant everything. Measure by share of the syllabus (notes pages) instead.
+- **Scoring a paper with its own automatic tags inflates results.** A mis-tag into a popular topic counts as covered. Score with hand-checked tags.
+- **Topics from notes headings alone did no better than random.** The ktunotes topic list, plus notes content it misses, plus splitting coarse topics by groups of past questions, beat random by about 15–24 points (hand-built: about 25).

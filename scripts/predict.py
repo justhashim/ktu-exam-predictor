@@ -29,7 +29,51 @@ import argparse, json, math, os, random, re, statistics, sys, datetime   # stand
 LAMBDA = 0.7          # recency decay per paper
 SIM_THRESHOLD = 0.55  # average cosine similarity for two clusters to be the same question
 L2 = 0.05
-CURVE_K = [10, 15, 20, 25, 30, 35, 40]
+SHARES = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]   # study targets as a share of all topics, so 20-topic and 70-topic
+                                               # subjects are measured the same way
+
+
+def effort_map(topics):
+    """Study size of each topic: its notes pages; topics without pages count as a median-sized topic; pieces of a
+    split topic share their parent's size by effort_share. Coverage targets are shares of the total size."""
+    pages = {t: notes_pages(m) for t, m in topics.items()}
+    pos = sorted(v for v in pages.values() if v > 0)
+    med = pos[len(pos) // 2] if pos else 1
+
+    def base(t):
+        m = topics[t]
+        if m.get("effort_pages"):
+            return float(m["effort_pages"])
+        return float(pages[t] or med)
+    out = {}
+    for t, m in topics.items():
+        if m.get("parent") in topics:
+            out[t] = base(m["parent"]) * float(m.get("effort_share", 0.5))
+        elif m.get("split"):
+            out[t] = base(t) * float(m.get("effort_share", 0.5))
+        else:
+            out[t] = base(t)
+    return out
+
+
+def take_share(order, effort, share):
+    """Topics from the front of the ranking until they make up `share` of the total study size."""
+    total, acc, out = sum(effort[t] for t in order), 0.0, []
+    for t in order:
+        if out and acc >= share * total:
+            break
+        out.append(t); acc += effort[t]
+    return set(out)
+
+
+def random_share(rng, keys, effort, share):
+    order = list(keys)
+    rng.shuffle(order)
+    return take_share(order, effort, share)
+
+
+def pct(share):
+    return f"{round(share * 100)}%"
 ADJUST = {
     "syllabus_weight": {"in": 1.0, "partial": 0.7, "old": 0.5, "new": 1.0},
     "model_paper_boost": 0.30,
@@ -245,9 +289,9 @@ def notes_pages(meta):
 def notes_prior(topics, expected_topics):
     pages = {t: notes_pages(m) for t, m in topics.items()}
     pos = [v for v in pages.values() if v > 0]
-    if not pos:
+    if not pos and not any(m.get("weight_hint") for m in topics.values()):
         return {t: 0.5 for t in topics}
-    med = float(statistics.median(pos))
+    med = float(statistics.median(pos)) if pos else 1.0
     raw = {t: min(2.5, (v / med) ** 0.5) for t, v in pages.items() if v > 0}
     for t, m in topics.items():      # topics known only from a topics list (e.g. scanned notes): use its weight hint
         if t not in raw and m.get("weight_hint"):
@@ -333,13 +377,13 @@ def holdout(cfg, papers, topics, qs, X, C, types, keys, h, modules):
         "notes only": order_balanced(topic_forecast(p_hist, topics, prior, 0.0), topics, modules),
         f"blend a={alpha}": order_balanced(topic_forecast(p_hist, topics, prior, alpha), topics, modules),
     }
-    grid = [10, 15, 20, 25, 30, 35, 40]
-    out = {"paper": papers[h]["label"], "curves": {}}
+    n, eff = len(topics), effort_map(topics)
+    out = {"paper": papers[h]["label"], "n_topics": n, "curves": {}}
     for name, order in variants.items():
-        out["curves"][name] = {str(K): attainable(pq, covers(set(order[:K]))) for K in grid}
+        out["curves"][name] = {pct(f): attainable(pq, covers(take_share(order, eff, f))) for f in SHARES}
     rng = random.Random(0)
-    out["curves"]["random"] = {str(K): statistics.mean([attainable(pq, covers(set(rng.sample(sorted(topics), min(K, len(topics))))))
-                                                         for _ in range(300)]) for K in grid}
+    out["curves"]["random"] = {pct(f): statistics.mean([attainable(pq, covers(random_share(rng, sorted(topics), eff, f)))
+                                                         for _ in range(300)]) for f in SHARES}
     return out
 
 
@@ -369,16 +413,16 @@ def main():
     behaviour = repeat_behaviour(papers, qs) if qs else {"per_paper": []}
 
     # rolling backtest of the history model on old-course papers
-    rows = []
+    rows, eff_all = [], effort_map(topics)
     for k in range(3, P):
         pq = [q for q in qs if q["paper"] == k]
         p_k = history_probs(X, C, types, k, types[k], keys)
         order = sorted(keys, key=lambda t: -p_k[t])
         rng = random.Random(k)
         rows.append({"paper": papers[k]["label"], "course": papers[k]["course"],
-                     "curve": {str(K): attainable(pq, covers(set(order[:K]))) for K in CURVE_K},
-                     "random": {str(K): float(statistics.mean([attainable(pq, covers(set(rng.sample(keys, min(K, len(keys))))))
-                                                       for _ in range(200)])) for K in CURVE_K}})
+                     "curve": {pct(f): attainable(pq, covers(take_share(order, eff_all, f))) for f in SHARES},
+                     "random": {pct(f): float(statistics.mean([attainable(pq, covers(random_share(rng, keys, eff_all, f)))
+                                                       for _ in range(200)])) for f in SHARES}})
     holdouts = [holdout(cfg, papers, topics, qs, X, C, types, keys, h, modules)
                 for h in range(3, P) if papers[h]["course"] == cfg["code"]]
 
@@ -408,6 +452,8 @@ def main():
             v = adj[t]["p"] * qpp * wtimes[f] / tot[t]
             if v > best:
                 best, bt = v, t
+        if topics[bt].get("module") not in modules:      # e.g. the OFF_SYLLABUS bucket: not a study item
+            continue
         fam_out.append({"family": int(f), "topic": bt, "module": topics[bt]["module"], "p": best,
                         "times": len({q["paper"] for q in mem}),
                         "current_course": any(papers[q["paper"]]["course"] == cfg["code"] for q in mem),
@@ -445,17 +491,29 @@ def main():
 
     bt_curve = {}
     if rows:
-        bt_curve = {str(K): {"mean": statistics.mean([r["curve"][str(K)] for r in rows]),
-                             "worst": min(r["curve"][str(K)] for r in rows),
-                             "random": statistics.mean([r["random"][str(K)] for r in rows])} for K in CURVE_K}
+        bt_curve = {pct(f): {"mean": statistics.mean([r["curve"][pct(f)] for r in rows]),
+                             "worst": min(r["curve"][pct(f)] for r in rows),
+                             "random": statistics.mean([r["random"][pct(f)] for r in rows])} for f in SHARES}
+    # is the ranking informative? (too few topics per module, or nearly equal probabilities)
+    warnings = []
+    for m in modules:
+        ps = sorted((adj[t]["p"] for t in topics if topics[t]["module"] == m), reverse=True)
+        if 0 < len(ps) < 6:
+            warnings.append(f"Module {m} has only {len(ps)} topics: its ranking adds little; study the whole module.")
+        elif len(ps) >= 6 and ps[len(ps) // 5] - ps[-(len(ps) // 5) - 1] < 0.08:
+            warnings.append(f"Module {m}: topic probabilities are nearly equal, so the order within it is weak.")
+    if not any(m["module"] for m in topics.values()):
+        warnings.append("No topics.")
     out = {"generated": datetime.date.today().isoformat(), "subject": {k: cfg[k] for k in ("code", "name") if k in cfg},
            "target": target, "papers": [{"id": p["id"], "label": p["label"], "type": p["type"], "course": p["course"]} for p in papers],
            "n_questions": len(qs), "n_families": n_fam, "alpha_history": cfg.get("alpha_history", 0.25) if p_hist is not None else 0.0,
            "behaviour": behaviour, "backtest": bt_curve, "holdout": holdouts,
            "topics": [{"rank": i + 1, "key": t, "name": topics[t]["name"], "module": topics[t]["module"],
-                       "notes": topics[t].get("notes", []), "asked": int(sum(r[keys.index(t)] for r in X)) if P else 0, **adj[t]}
+                       "notes": topics[t].get("notes", []), "notes_parent": topics[t].get("notes_parent", []),
+                       "parent": topics[t].get("parent"), "asked": int(sum(r[keys.index(t)] for r in X)) if P else 0, **adj[t]}
                       for i, t in enumerate(order)],
-           "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper}
+           "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper,
+           "warnings": warnings}
     json.dump(out, open(os.path.join(D, "results.json"), "w"), indent=1, ensure_ascii=False)
     write_markdown(out, cfg, os.path.join(D, "FORECAST.md"))
     report(out)
@@ -466,23 +524,27 @@ def write_markdown(o, cfg, path):
          f"Generated {o['generated']} by the ktu-exam-predictor skill from {len(o['papers'])} papers"
          + (f" ({', '.join(p['label'] + ' ' + p['course'] for p in o['papers'])})" if o["papers"] else "") + ".", "",
          f"Topic probability = history x {o['alpha_history']:.2f} + notes prior x {1 - o['alpha_history']:.2f}. "
-         "Study order is module-balanced. Notes pages refer to the PDFs in `notes/`.", ""]
+         "Study order is module-balanced. Notes pages refer to the PDFs in `notes/`. "
+         "Coverage tables use the share of the syllabus studied (by notes pages), so subjects with few or many "
+         "topics compare fairly.", ""]
+    if o.get("warnings"):
+        L += ["> [!WARNING]"] + [f"> {w}" for w in o["warnings"]] + [""]
     if o["backtest"]:
         L += ["## History-model backtest (past papers predicted from earlier ones)", "",
-              "| K topics | mean | worst | random |", "|---|---|---|---|"]
+              "| Syllabus studied | mean | worst | random |", "|---|---|---|---|"]
         L += [f"| {K} | {v['mean']:.0%} | {v['worst']:.0%} | {v['random']:.0%} |" for K, v in o["backtest"].items()]
         L.append("")
     for h in o["holdout"]:
         L += [f"## Holdout: {h['paper']} forecast from earlier papers only", "",
-              "| K | " + " | ".join(h["curves"]) + " |", "|---|" + "---|" * len(h["curves"])]
-        for K in ("15", "20", "25", "30", "35"):
+              "| Syllabus studied | " + " | ".join(h["curves"]) + " |", "|---|" + "---|" * len(h["curves"])]
+        for K in ("30%", "40%", "50%", "60%", "70%"):
             L.append(f"| {K} | " + " | ".join(f"{c[K]:.0%}" for c in h["curves"].values()) + " |")
         L.append("")
     L += ["## Study order (module-balanced)", "", "| # | Topic | Module | P(asked) | history | notes | Notes pages | Times asked |",
           "|---|---|---|---|---|---|---|---|"]
     for t in o["topics"]:
         L.append(f"| {t['rank']} | {t['name']} | M{t['module']} | {t['p']:.2f} | {t['p_history']:.2f} | {t['p_notes']:.2f} | "
-                 f"{', '.join(t['notes']) or 'not in notes'} | {t['asked']} |")
+                 f"{', '.join(t['notes']) or (('within ' + ', '.join(t['notes_parent'])) if t.get('notes_parent') else 'not in notes')} | {t['asked']} |")
     if o["questions"]:
         L += ["", f"## Questions most likely to be reused (about {o['expected_repeats']:.0f} expected)", "",
               "| P | Question (latest wording) | Module | Asked in |", "|---|---|---|---|"]
@@ -506,10 +568,12 @@ def report(o):
     for r in o["behaviour"]["per_paper"]:
         print(f"  {r['paper']:9s} {r['course']:9s} ({r['type'][:4]})  {r['repeats']:2d}/{r['questions']} reused ({r['rate']:.0%})")
     if o["backtest"]:
-        print("history backtest (K: mean / worst / random): " +
+        print("history backtest (share of syllabus: mean / worst / random): " +
               "  ".join(f"{K}: {v['mean']:.0%}/{v['worst']:.0%}/{v['random']:.0%}" for K, v in o["backtest"].items()))
     for h in o["holdout"]:
-        print(f"holdout {h['paper']}: " + " | ".join(f"{n}: K25 {c['25']:.0%} K35 {c['35']:.0%}" for n, c in h["curves"].items()))
+        print(f"holdout {h['paper']} ({h['n_topics']} topics): " + " | ".join(f"{n}: 40% {c['40%']:.0%} 60% {c['60%']:.0%}" for n, c in h["curves"].items()))
+    for w in o.get("warnings", []):
+        print("WARNING:", w)
     print(f"\nFORECAST {o['target']['label']}  (alpha history {o['alpha_history']:.2f})")
     for t in o["topics"][:20]:
         print(f"  {t['rank']:2d}. M{t['module']} {t['p']:.2f} (hist {t['p_history']:.2f} notes {t['p_notes']:.2f})  {t['name']}")

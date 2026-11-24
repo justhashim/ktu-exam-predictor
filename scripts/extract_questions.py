@@ -229,7 +229,19 @@ def main():
                       f"{scheme} scheme, {st}")
     # duplicate sessions (the same paper saved under two names): mark the later-listed one
     def toks(p):
-        return {w for q in p.get("questions", []) for w in re.findall(r"[a-z]{4,}", q["text"].lower())}
+        """Words of the paper: from its full text file if there is one (works even when extraction failed)."""
+        src = p.get("source")
+        txt = os.path.join(D, src[:-4] + ".txt") if src else ""
+        if txt and os.path.exists(txt):
+            body = open(txt, errors="replace").read()
+            if "PART" in body:
+                words = set(re.findall(r"[a-z]{4,}", body[body.find("PART"):].lower()))   # skip the ktunotes cover page
+                if len(words) >= 150:          # enough real paper text to compare
+                    return words
+        words = {w for q in p.get("questions", []) for w in re.findall(r"[a-z]{4,}", q["text"].lower())}
+        return words if len(words) >= 80 else set()     # too little content: never call it a duplicate
+    for p in P["papers"]:
+        p.pop("duplicate_of", None)
     for i, p in enumerate(P["papers"]):
         for o in P["papers"][:i]:
             A_, B_ = toks(p), toks(o)

@@ -25,7 +25,7 @@ An agent skill for students of APJ Abdul Kalam Technological University (KTU). I
 - **Plug and play.** Plain Python 3 standard library, with no `pip install`, no API keys and no setup.
 - **One command.** `ktu.py prepare "DAA"` runs the whole pipeline: fetch, extract, topics, tags, forecast.
 - **Any course, by code or name.** `PCCST502`, `DAA` and `design and analysis of algorithms` all work. Older-scheme versions are found automatically (PCCST502 → CST306).
-- **Notes-first topics.** Topics come from the sections of the current ktunotes notes, falling back to ktunotes' own topic list for scanned modules. This fixed the biggest weakness of past-paper-only prediction (see [Accuracy](#accuracy)).
+- **Topics that cover the current syllabus.** The ktunotes topic list is extended with notes sections it misses. Coarse topics are split into subtopics built from groups of similar past questions, and old-course questions that fit nothing go to an "off-syllabus" bucket instead of distorting the ranking.
 - **Honest status.** Papers that fail the KTU marks check, scanned papers and low-confidence tags are listed, so an agent (or you) knows exactly what is worth checking by hand.
 - **Module-balanced study order.** Each module carries equal marks, so the plan never leaves a whole module uncovered.
 - **Likely questions, with every past wording.** Questions are ranked by reuse, with current-scheme papers weighted higher, and there is an assembled "likely paper".
@@ -145,20 +145,24 @@ Questions are grouped into families of the same question across papers. Each fam
 
 ## Accuracy
 
-The method was checked against a real paper: KTU's first PCCST501 Computer Networks paper (Nov 2026, 60 marks). It was re-forecast from pre-exam data only, and the table shows the share of marks covered by studying the top-ranked topics:
+Checked on one real paper: KTU's first PCCST501 Computer Networks paper (Nov 2026, 60 marks).
+- **Method:** each version re-forecast that paper from pre-exam data only.
+- **Measure:** the share of its marks covered by studying the top-ranked part of the syllabus, sized by notes pages.
+- **Scoring:** the exam's questions were scored with hand-checked topic tags in every version, so automatic mistakes can't flatter the result.
 
-| Method | Topics studied | Marks covered | Random topics |
-|---|---|---|---|
-| Past papers only (the original version) | top 35 of 52 | 83% | 66% |
-| **Fully automatic (`ktu.py prepare`)** | top 57% | **85%** | 63% |
-| Hand-checked topics and tags | top 57% | **90%** | 65% |
+| Topics and tags | 40% of syllabus studied | 60% of syllabus studied |
+|---|---|---|
+| **Automatic (`ktu.py prepare`)** | **50%** of marks (random: 35%) | **73%** (random: 49%) |
+| Hand-checked | 67% (random: 42%) | 83% (random: 57%) |
 
-What the check showed:
-- **The setter worked from the new notes and the textbook.** Every question was in the notes, several as the textbook's own worked examples.
-- **About half the questions were reworded old-course questions.**
+What the checks showed:
+- **The setter followed the new notes and textbook.** Every question was in the notes, and about half were reworded old-course questions.
+- **Topics drawn only from old papers missed new syllabus content** (14 of 60 marks).
+- **One automatic method was rejected:** topics from notes headings alone scored no better than random.
+- **Measuring by number of topics flatters coarse topic lists,** so this project measures by share of the syllabus.
 
 > [!WARNING]
-> This is one paper, and the weights were tuned on it, so expect a little less on new papers. Predicting the exact wording of a question is weak. The value is in knowing which **topics** to cover, and in covering every module. No forecast replaces studying the notes.
+> This is one paper, and some settings were chosen while looking at it, so treat the numbers as rough. Predicting the exact wording of a question is weak. The value is in knowing which **topics** to cover, and in covering every module. No forecast replaces studying the notes.
 
 > [!NOTE]
 > This project is not affiliated with KTU or ktunotes.live. It downloads publicly shared files for personal study. Please respect the sources and their terms of use.
