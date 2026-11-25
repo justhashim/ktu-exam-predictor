@@ -88,6 +88,8 @@ Open `FORECAST.md`. It contains:
 
 When they appear, the ranking is weak: tell the student so and cover every module evenly.
 
+**Questions marked "auto-read, may be garbled"** were read automatically from a PDF that failed the marks check. Before you teach one, read it from the paper (`pyq/img/` or the PDF) and quote the real wording.
+
 `status` lists what is still automatic-quality:
 - papers whose drafts failed the KTU marks check, or that are scans with no questions
 - low-confidence tags

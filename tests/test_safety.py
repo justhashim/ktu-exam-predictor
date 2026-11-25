@@ -125,9 +125,14 @@ class TestMarkdownSafe(unittest.TestCase):
         self.assertIn("notes", out)
 
     def test_html_and_table_breaks_are_neutral(self):
-        out = safety.md_safe("<img src=x onerror=alert(1)> a | b\n| injected | row |\n<script>x</script>")
-        for bad in ("<", ">", "|", "\n"):
+        out = safety.md_safe("<img src=x onerror=alert(1)> a | b\n| injected | row |\n<script>x</script><!-- c --><?x?>")
+        self.assertNotRegex(out, r"<[A-Za-z/!?]", "no HTML tag, comment or processing instruction can start")
+        for bad in ("|", "\n"):
             self.assertNotIn(bad, out)
+
+    def test_maths_stays_readable(self):
+        for s in ("P(X > 0) = P(X < 0)", "0 < x < 1 and y >= 2", "f(x) = e^(-x), x > 0", "A & B"):
+            self.assertEqual(safety.md_safe(s), s)
 
     def test_bare_urls_and_schemes_are_broken(self):
         for s in ("visit https://evil.example now", "javascript:alert(1)", "file:///etc/passwd"):
