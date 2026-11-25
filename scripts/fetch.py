@@ -24,6 +24,8 @@ for PDF text; without either, PDFs are downloaded but not read (ktu.py status sa
 import html, json, os, re, shutil, subprocess, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import safety  # noqa: E402
 def _study_root():
     """Where subject folders live: $KTU_STUDY_DIR, else ~/Documents/Study Materials if it exists, else ~/KTU Exams."""
     if os.environ.get("KTU_STUDY_DIR"):
@@ -38,10 +40,25 @@ CACHE_DAYS = 7
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) study-helper"}
 
 
+class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to an allowed https host (Drive redirects to googleusercontent.com)."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        safety.check_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(_CheckedRedirect)
+
+
 def get(url, binary=False, timeout=120):
+    """The only network call in the skill: https to safety.ALLOWED_HOSTS, at most safety.MAX_DOWNLOAD bytes."""
+    safety.check_url(url)
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = r.read()
+    with _OPENER.open(req, timeout=timeout) as r:
+        safety.check_url(r.geturl())
+        data = r.read(safety.MAX_DOWNLOAD + 1)
+    if len(data) > safety.MAX_DOWNLOAD:
+        raise safety.BlockedURL(f"download larger than {safety.MAX_DOWNLOAD // 2**20} MB: {url}")
     return data if binary else data.decode("utf-8", "replace")
 
 
@@ -94,7 +111,7 @@ def list_folder(fid):
     s = get(f"https://drive.google.com/embeddedfolderview?id={fid}")
     out = []
     for m in re.finditer(r'href="(https://drive\.google\.com/[^"]+)"[^>]*>.*?flip-entry-title">([^<]+)', s, re.S):
-        url, name = m.group(1), html.unescape(m.group(2)).strip()
+        url, name = m.group(1), safety.scrub(html.unescape(m.group(2)).strip())   # names are shown to the agent
         f = re.search(r'/folders/([A-Za-z0-9_-]+)', url)
         d = re.search(r'/file/d/([A-Za-z0-9_-]+)', url)
         if f:
@@ -169,7 +186,7 @@ def outline(pdf, width=110):
     if not os.path.exists(txt) and not pdf_text(pdf, txt):
         return [f"(no text for {os.path.basename(pdf)}: read the PDF directly)"]
     pages = open(txt, encoding="utf-8", errors="replace").read().split("\f")
-    norm = [[re.sub(r"\s+", " ", l).strip() for l in p.splitlines() if l.strip()] for p in pages]
+    norm = [[safety.scrub(re.sub(r"\s+", " ", l).strip()) for l in p.splitlines() if l.strip()] for p in pages]
     count = {}
     for ls in norm:
         for l in set(ls):
@@ -220,12 +237,12 @@ def cmd_notes(code, D, folder=None, prefix=""):
     os.makedirs(os.path.join(D, "notes"), exist_ok=True)
     outl = []
     for p, it in pick:
-        name = (prefix + " " if prefix else "") + re.sub(r"[^A-Za-z0-9._ -]+", "_", it["name"])
+        name = (prefix + " " if prefix else "") + safety.safe_name(it["name"])
         if prefix and not re.search(r"(?:^|[^A-Za-z])(?:M|MOD|MODULE)[\s_-]*0?[1-6](?!\d)", name, re.I):
             mm = re.search(r"(?i)\b(?:M|MOD|MODULE)[\s_-]*0?([1-6])\b", " ".join(p))   # module only in the folder name
             if mm:
                 name = f"{prefix} M{mm.group(1)} " + name[len(prefix) + 1:]
-        path = os.path.join(D, "notes", name)
+        path = safety.safe_join(os.path.join(D, "notes"), name)
         print("->", "/".join(p), "/", it["name"])
         if not os.path.exists(path) and not download_drive(it["id"], path):
             continue
@@ -370,7 +387,7 @@ def resolve(query, extra_old=(), name=None):
                                 if name_sim(q, c["name"]) >= 0.75 * top and c["code"] != hit["code"]][:5]
     if not hit:
         sys.exit(f"Could not resolve '{query}'. Try the exact course code, or `fetch.py search <words>`.")
-    code, name = hit["code"], hit["name"]
+    code, name = hit["code"], safety.scrub(hit["name"])      # catalogue and --name text are printed to the agent
     # predecessors: older-scheme codes with a similar name (catalogue neighbours and past-paper file names)
     idx = pyq_index()
     avail = {}
@@ -483,22 +500,27 @@ def ingest_user_files(D, code):
     added_notes, papers = 0, []
     for f in sorted(os.listdir(un)):
         src, low = os.path.join(un, f), f.lower()
+        if os.path.islink(src):          # a link could point anywhere (e.g. a key file); copy only real files
+            continue
         if low.endswith(".pdf"):
-            dst = os.path.join(D, "notes", "MY " + re.sub(r"[^A-Za-z0-9._ -]+", "_", f))
+            dst = safety.safe_join(os.path.join(D, "notes"), "MY " + f)
             if not os.path.exists(dst):
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy(src, dst)
-                print("   own notes:", f, "->", to_text(dst, os.path.join(D, "notes", "img")))
+                print("   own notes:", os.path.basename(dst), "->", to_text(dst, os.path.join(D, "notes", "img")))
             added_notes += 1
         elif low.endswith(IMG_EXT):
             os.makedirs(os.path.join(D, "notes", "img"), exist_ok=True)
-            shutil.copy(src, os.path.join(D, "notes", "img", "MY " + f))
+            shutil.copy(src, safety.safe_join(os.path.join(D, "notes", "img"), "MY " + f))
             added_notes += 1
     groups = {}
     for f in sorted(os.listdir(up)):
         src = os.path.join(up, f)
+        if os.path.islink(src):
+            continue
         if os.path.isdir(src):
-            imgs = [os.path.join(src, x) for x in sorted(os.listdir(src)) if x.lower().endswith(IMG_EXT)]
+            imgs = [os.path.join(src, x) for x in sorted(os.listdir(src))
+                    if x.lower().endswith(IMG_EXT) and not os.path.islink(os.path.join(src, x))]
             if imgs:
                 groups[f] = imgs
         elif f.lower().endswith(".pdf"):
@@ -506,10 +528,11 @@ def ingest_user_files(D, code):
         elif f.lower().endswith(IMG_EXT):
             groups.setdefault("photos", []).append(src)
     for stem, files in groups.items():
-        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_")[:60] or "paper"
+        stem = safety.clean_text(stem)
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_.")[:60] or "paper"
         pid = "MY_" + safe.upper()
         if files[0].lower().endswith(".pdf"):
-            dst = os.path.join(D, "pyq", "MY_" + safe + ".pdf")
+            dst = safety.safe_join(os.path.join(D, "pyq"), "MY_" + safe + ".pdf")
             if not os.path.exists(dst):
                 shutil.copy(files[0], dst)
             st = to_text(dst, os.path.join(D, "pyq", "img"), min_total=3000)
@@ -517,15 +540,15 @@ def ingest_user_files(D, code):
         else:
             os.makedirs(os.path.join(D, "pyq", "img"), exist_ok=True)
             for i, f in enumerate(files, 1):
-                shutil.copy(f, os.path.join(D, "pyq", "img", f"MY_{safe}-{i}{os.path.splitext(f)[1].lower()}"))
+                shutil.copy(f, safety.safe_join(os.path.join(D, "pyq", "img"), f"MY_{safe}-{i}{os.path.splitext(f)[1].lower()}"))
             st, src_rel = f"photos -> pyq/img/MY_{safe}-*", None
-        cm = re.search(r"[A-Z]{2,5}\d{3}", os.path.basename(files[0]).upper())
+        cm = re.search(r"(?<![A-Z0-9])[A-Z]{2,5}\d{3}(?![0-9])", os.path.basename(files[0]).upper())   # not "NOV2026"
         mon = next((MON_NAME[MONTHS[t]] for t in re.findall(r"[A-Z]{3,4}", stem.upper()) if t in MONTHS), "")
         yr = re.search(r"20\d\d", stem)
-        papers.append({"id": pid, "label": (f"{mon} {yr.group(0)}".strip() if yr else stem[:24]) + " (own copy)",
+        papers.append({"id": pid, "label": (f"{mon} {yr.group(0)}".strip() if yr else safety.scrub(stem)[:24]) + " (own copy)",
                        "type": "regular", "course": cm.group(0) if cm else code, "source": src_rel, "own": True,
                        "questions": [], "_status": st})
-        print(f"   own paper: {stem} -> {st}")
+        print(f"   own paper: {safe} -> {st}")
     return added_notes, papers
 
 
@@ -553,7 +576,7 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
     os.makedirs(pq, exist_ok=True)
     status = []
     for r in picks:
-        path = os.path.join(pq, r["file"])
+        path = safety.safe_join(pq, r["file"])
         ok = os.path.exists(path) or (download_drive(r["id"], path) if r["id"] else _dl(r["url"], path))
         st = to_text(path, os.path.join(pq, "img"), min_total=3000) if ok else "DOWNLOAD FAILED"
         status.append((r, st))
@@ -648,7 +671,8 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
 
 def _dl(url, path):
     try:
-        open(path, "wb").write(get(url, binary=True, timeout=300))
+        data = get(url, binary=True, timeout=300)     # download first: a refused URL leaves no empty file behind
+        open(path, "wb").write(data)
         return True
     except Exception as e:
         print("   failed:", e)

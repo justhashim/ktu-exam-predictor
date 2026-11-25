@@ -18,6 +18,9 @@ SUBJECT_DIR/pyq/EXTRACTION.md, so they can be corrected from the PDF or the page
 """
 import json, os, re, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import safety  # noqa: E402
+
 MARK = re.compile(r"^(?P<body>.*?)\s*[({\[]\s*(?P<m>\d{1,2})\s*[)\]}\\|1l]?\s*$")
 MARK_BARE = re.compile(r"^(?P<body>.*?\S)?\s{4,}(?P<m>\d{1,2})\s*$")        # marks column without brackets: "...    3"
 SUBLBL = re.compile(r"^\s*(?:[0-9IlLtTi|]{1,3}\s*)?(?P<l>[a-c])\s*(?:\)|[l|1](?=\s))\s*")
@@ -110,11 +113,11 @@ def collect(lines, part, bare=False):
 
 
 def tidy(t):
-    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\s+", " ", safety.clean_text(t)).strip()
     t = re.sub(r"^[\s'\",.*`|;:J]*\d{0,2}\s+(?=[A-Za-z(])", "", t)         # OCR specks before the text
     t = SUBLBL.sub("", t, count=1)
     t = NUMLEAD.sub("", t, count=1)
-    return t.strip()
+    return safety.scrub(t.strip())      # paper text is untrusted: instructions to an AI are withheld
 
 
 def number(part_a, part_b):
@@ -212,6 +215,10 @@ def check_only(D):
         qs = p.get("questions", [])
         if not qs:
             print(f"  {p['label']:24s} NO QUESTIONS"); bad += 1; continue
+        for q in qs:
+            q["text"] = safety.scrub(q.get("text", ""))
+            if q["text"] == safety.WITHHELD:
+                print(f"  {p['label']}: {q['q']} looked like instructions to an AI agent and was withheld")
         scheme, probs = check(qs)
         ids = [q["q"] for q in qs]
         probs += [f"duplicate id {i}" for i in sorted({i for i in ids if ids.count(i) > 1})]

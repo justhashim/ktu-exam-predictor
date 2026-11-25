@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only token; pull requests from forks get no secrets (plain pull_request, never pull_request_target).
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.8", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+      # Offline by design: the tests set KTU_NO_NETWORK=1, so nothing is downloaded.
+      - name: Run tests
+        env:
+          KTU_NO_NETWORK: "1"
+        run: uv run --no-project --python ${{ matrix.python }} python -m unittest discover -s tests -v
