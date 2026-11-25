@@ -31,6 +31,17 @@ It does the following, printing what it did at each step:
 6. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`).
    - The study dir is `$KTU_STUDY_DIR`, else `~/Documents/Study Materials` if it exists, else `~/KTU Exams`.
 
+**A code missing from the ktunotes catalogue** (often a branch new in the 2024 scheme, e.g. PCEOT501 of Electrical and Computer Engineering, with no papers yet) stops with a message. Read the course name from the question paper or ask, then rerun with `--name "<course name>"`.
+
+**When `prepare` prints `== ASK THE USER`** (ktunotes has no notes, or no past papers at all), stop and ask before going on (with AskUserQuestion if you have it):
+- Ask them to download the notes or syllabus, and any past papers, from the college portal, classmates or the department.
+- They go in the folders it printed: `<subject>/notes/` and `<subject>/papers/` (one PDF, or one folder of photos, per paper).
+- Then rerun `prepare`. It picks these files up, and photos become papers to transcribe.
+- **If they can't or would rather not, carry on with the usual process:**
+  - Use the predecessor papers.
+  - Add `--notes-from CODE` for the similar courses it lists; their notes stand in for the syllabus. Build their topics by hand from `notes/OUTLINE.txt`, since automatic topics from such notes were unusable.
+  - Tell the student plainly that content new to this syllabus can't appear in the forecast.
+
 **Check the course and predecessors it printed.** If the name matched several courses, a `NOTE: the name also matches` line lists them; rerun with the exact code if needed. A similarly named course with different content (an ECE version, say) adds noise. Rerun with `--old CODE` to force a predecessor, then delete the wrong papers from `papers.json` and `pyq/`.
 
 Re-running `prepare` is safe:
@@ -113,10 +124,13 @@ Go topic by topic, and let the student say "next" to move on. If your agent can 
 
 ## Before you start
 
-- **Read `references/lessons.md`.** A forecast built only from old papers missed 14 of 60 marks. Topics must cover the current syllabus, and accuracy must be measured fairly.
+- **Read `references/lessons.md`.** Topics must cover the current syllabus, and accuracy must be measured fairly. Forecasts built only from old papers missed 14 of 60 marks (CN) and a whole 20-mark module (PCEOT501).
 - **Read `references/student.md` if it exists.** It is private and local: the student's courses, exam dates and how they like to study (`references/student.example.md` shows the format). If it is missing, ask for the exam date and how much time they have.
 
 **After the real exam:**
-1. Add it to `papers.json` with `"course": "<current code>"`.
-2. Run `ktu.py predict`. A holdout table shows how each method would have done.
-3. Note what you learned in `references/lessons.md`.
+1. **Before you look at the paper,** copy the forecast to a snapshot: `topics.json`, `results.json`, `papers.json` and `FORECAST.md` go into `predictor/blind_<name>/`.
+2. Transcribe the paper. Hand-tag it against the snapshot's topic keys, and use `NEW_*` tags for content that no topic holds.
+3. Run `python3 $S/score.py <snapshot> <paper.json>` (add `--tags strict` for a second, strict set of tags). This is the fair score.
+   - The holdout that `predict` prints after you add the paper is optimistic when you changed topics after seeing it.
+4. Add the paper to `papers.json` with `"course": "<current code>"`, then fix the topics and modules it showed were wrong.
+5. Note what you learned in `references/lessons.md`.
