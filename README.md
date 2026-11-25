@@ -4,60 +4,71 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
-[![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#getting-started)
+[![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#install)
 [![Agent skill](https://img.shields.io/badge/agent-skill-d97757.svg)](https://www.npmjs.com/package/skills)
 [![Tests](https://github.com/justhashim/ktu-exam-predictor/actions/workflows/tests.yml/badge.svg)](https://github.com/justhashim/ktu-exam-predictor/actions/workflows/tests.yml)
 
-Give it a KTU course code or name. It finds the past papers and the module notes, works out which topics matter, and turns that into a study plan you can get through before the exam.
+Tell it your KTU subject. It tells you which topics to study first.
 
-[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [How it works](#how-it-works) • [Accuracy](#accuracy) • [Safety](#safety-and-contributing)
+[What it does](#what-it-does) • [Does it work?](#does-it-work) • [Install](#install) • [Use it](#use-it) • [How it works](#how-it-works) • [Safety](#safety)
 
 </div>
 
-An agent skill for students of APJ Abdul Kalam Technological University (KTU). It works with Claude Code, opencode and other agents. Ask your coding agent *"predict DAA"* or *"important topics for machine learning, exam on Monday"* and it will:
+## What it does
 
-1. find the course and its older-scheme versions
-2. download about 10 past papers and the module notes
-3. build a ranked, module-balanced forecast in about a minute
-4. teach it, one topic at a time
+You type something like *"predict DAA, exam on 27 Nov"* into an AI coding agent (Claude Code, opencode and others). The skill then:
 
-## Features
+1. **Collects everything about the subject:** the official syllabus, the module notes, about 10 past question papers (including the older version of the course), and the official model question paper.
+2. **Reads every question** from those papers, with its marks.
+3. **Works out which topics come up most,** and which take the most space in the notes and syllabus.
+4. **Gives you a study plan:** topics in order, module by module, with every past version of each question.
+5. **Teaches it,** one topic at a time. Say "next" to move on.
 
-- **Plug and play.** Plain Python 3 standard library, with no `pip install`, no API keys and no setup.
-- **One command.** `ktu.py prepare "DAA"` runs the whole pipeline: fetch, extract, topics, tags, forecast.
-- **Any course, by code or name.** `PCCST502`, `DAA` and `design and analysis of algorithms` all work. Older-scheme versions are found automatically (PCCST502 → CST306).
-- **Every source, used together.** The syllabus, the notes, past papers and the official model paper:
-  - **Syllabus:** sets the exam pattern (40-mark project-based courses included), adds the topics the ktunotes list misses, and decides whether an older course is really the same subject.
-  - **Notes:** set how big each topic is.
-  - **Past papers:** give the history.
-  - **Model paper:** shows the setter's style.
-  - Each forecast starts by listing what it used.
-- **Topics that cover the current syllabus.** The ktunotes topic list is extended with notes sections and syllabus items it misses. When a course has no notes, each syllabus item becomes a topic. Coarse topics are split into subtopics built from groups of similar past questions, and old-course questions that fit nothing go to an "off-syllabus" bucket instead of distorting the ranking.
-- **Honest status.** Papers that fail the KTU marks check, scanned papers and low-confidence tags are listed, so you or your agent can see what's worth checking by hand.
-- **Module-balanced study order.** Each module carries equal marks, so the plan never leaves a whole module uncovered.
-- **Likely questions, with every past wording.** Questions are ranked by reuse, with current-scheme papers weighted higher, and there is an assembled "likely paper".
+It takes about a minute, and it's free: plain Python, nothing to install from pip, no accounts.
 
-## Getting started
+## Does it work?
 
-### Install
+### How we measure it
 
-With the [`skills`](https://www.npmjs.com/package/skills) CLI. No clone or build needed:
+Say a subject's syllabus is 10 chapters, and you only have time for 4.
+- **With the tool:** you study the 4 chapters it ranks highest.
+- **Without it:** you pick 4 chapters at random.
+
+Then we take the **real exam paper** and count how many marks you could have answered each way. The forecast is made **before** the exam, then checked against the real paper.
+
+### Results so far
+
+| Real exam (Nov 2026) | Study the top 40% of the syllabus | Study the top 60% |
+|---|---|---|
+| **Computer Networks** (PCCST501) | **50%** of marks with the tool, 35% at random | **73%** with the tool, 49% at random |
+| **Microcontrollers & Embedded Systems** (PCEOT501), old papers only | **45%** with the tool, 26% at random | **57%** with the tool, 38% at random |
+| PCEOT501 again, now also using the official syllabus | **67%** with the tool, 49% at random | **90%** with the tool, 68% at random |
+
+In plain words:
+- **The tool's order always beat picking at random,** by about 15 to 25 points.
+- **Old papers alone can miss whole topics.** PCEOT501 is from a branch that is new in the 2024 scheme, so it had no past papers of its own, and its older course never covered ARM. A full 20-mark ARM module came, and no amount of studying the old list would have found it.
+- **The official syllabus fixed that,** because it lists everything that can be asked. So the tool now always downloads the syllabus and uses it. That PCEOT501 result is encouraging, but the syllabus reader was built after seeing that paper, so it isn't a fully blind test.
+- **On Computer Networks, the newest version scored about the same as the one before it.** The changes help most when something is missing (no notes, no papers, or the wrong older course). They don't change much when the notes and topic list are already good.
+
+> [!WARNING]
+> **These numbers come from only two real papers. Treat them as rough.** The tool tells you which **topics** matter. It can't tell you the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
+
+## Install
+
+With the [`skills`](https://www.npmjs.com/package/skills) tool. Nothing to download by hand:
 
 ```bash
-# Claude Code: for you, in every project
+# Claude Code, for all your projects
 pnpm dlx skills add justhashim/ktu-exam-predictor -g -a claude-code
 
-# opencode: for you, in every project
+# opencode, for all your projects
 pnpm dlx skills add justhashim/ktu-exam-predictor -g -a opencode
 
-# only for the current project (any agent; you'll be asked which)
+# just this project (it asks which agent)
 pnpm dlx skills add justhashim/ktu-exam-predictor
-
-# every agent the CLI knows about, no prompts
-pnpm dlx skills add justhashim/ktu-exam-predictor -g --all
 ```
 
-`npx skills add …` and `bunx skills add …` work the same way. To keep it up to date or remove it:
+`npx skills add …` and `bunx skills add …` also work. To update or remove it later:
 
 ```bash
 pnpm dlx skills update ktu-exam-predictor
@@ -65,7 +76,7 @@ pnpm dlx skills remove ktu-exam-predictor
 ```
 
 <details>
-<summary>Manual install (git)</summary>
+<summary>Install with git instead</summary>
 
 ```bash
 git clone https://github.com/justhashim/ktu-exam-predictor ~/.claude/skills/ktu-exam-predictor   # Claude Code
@@ -74,12 +85,9 @@ git clone https://github.com/justhashim/ktu-exam-predictor ~/.config/opencode/sk
 
 </details>
 
-### Requirements
-
-- Python 3.8 or newer. Nothing to `pip install` for the code itself. On Windows, run `python` or `py` instead of `python3`.
-- **Strongly recommended:** a PDF text tool, either `poppler-utils` (`pdftotext`, `pdftoppm`) or `pip install pypdf`.
-  - Without one, papers and notes are downloaded but can't be read, so there are no questions to learn from. `ktu.py status` tells you.
-  - `pdftoppm` also renders scanned papers as page images that your agent can read.
+**You need:**
+- **Python 3.8 or newer.** On Windows, type `python` or `py` instead of `python3`.
+- **A PDF reader for the scripts (strongly recommended):** `poppler-utils`, or `pip install pypdf`. Without one, the papers download but can't be read.
 
   ```bash
   sudo apt install poppler-utils     # Debian/Ubuntu
@@ -87,13 +95,9 @@ git clone https://github.com/justhashim/ktu-exam-predictor ~/.config/opencode/sk
   brew install poppler               # macOS
   ```
 
-Subject folders are created in `$KTU_STUDY_DIR` if set. Otherwise they go in `~/Documents/Study Materials` if that exists, or `~/KTU Exams`.
+## Use it
 
-Optionally, copy `references/student.example.md` to `references/student.md` and fill in your exam calendar and study style. It is git-ignored.
-
-## Usage
-
-### In your agent
+Just ask your agent in normal words:
 
 ```text
 predict DAA, exam is on 27 Nov
@@ -101,126 +105,114 @@ what are the important topics for PCCST503?
 I have the supply exam for computer networks next month, what will come?
 ```
 
-The agent runs the pipeline, reads the forecast, fixes what the status report flags if there is time, then teaches topic by topic.
+You get a file called `FORECAST.md` with:
+- **the study order,** module by module
+- **the questions most likely to come back,** with every past wording
+- **a sample paper** put together from the most likely questions (a guess, clearly labelled)
+- **warnings,** for example when there are too few papers to trust the ranking
 
-### Command line
+**If ktunotes has no notes or papers for your subject** (common for new branches), the agent asks you to put your own in a folder. Phone photos of question papers are fine. If you don't have any, it carries on with what it can find.
+
+Your files live in `~/Documents/Study Materials/<SUBJECT>/` if that folder exists, otherwise in `~/KTU Exams/`. Set `KTU_STUDY_DIR` to use another place.
+
+<details>
+<summary>Command line, folders and extra options</summary>
 
 ```bash
 S=~/.claude/skills/ktu-exam-predictor/scripts     # wherever the skill was installed
 
 python3 $S/ktu.py prepare "DAA" --label "Nov 2026"    # everything, about a minute
 python3 $S/ktu.py status  "DAA"                       # what is worth checking by hand
-python3 $S/ktu.py predict "DAA" --type supplementary  # re-run after edits
+python3 $S/ktu.py predict "DAA" --type supplementary  # run again after edits
 
-# a course ktunotes doesn't list (name from the question paper), using a similar course's notes as its syllabus
-python3 $S/ktu.py prepare PCEOT501 --name "Microcontrollers and Embedded Systems" --notes-from PBECT404 --notes-from PBCST504
+# a course ktunotes doesn't list: give its name from the question paper
+python3 $S/ktu.py prepare PCEOT501 --name "Microcontrollers and Embedded Systems"
 
-# leave out an older course that turned out to be a different subject (remembered)
+# use a similar course's notes when yours has none
+python3 $S/ktu.py prepare PCEOT501 --notes-from PBECT404 --notes-from PBCST504
+
+# leave out an "older version" that is really a different subject (remembered)
 python3 $S/ktu.py prepare PBCST504 --skip-old CST307
 ```
 
-Lower-level tools, if you want them:
+Other tools:
 - `fetch.py`: `resolve`, `setup`, `search`, `list-notes`, `notes`, `pyqs`, `outline`
-- `extract_questions.py`: add `--check` to validate edited papers (also marks re-uploaded duplicate papers)
-- `ktu.py`: `topics` and `autotag`
-- `score.py SNAPSHOT_DIR PAPER.json`: score a real paper against a forecast frozen before the exam
+- `extract_questions.py --check`: check papers after editing them
+- `score.py`: score a real paper against a forecast saved before the exam
 
-The output is `FORECAST.md` in the subject folder:
+What's in a subject folder:
 
 ```text
 <study dir>/<SUBJECT>/
-├── notes/           YOUR notes or syllabus, if ktunotes has none (prepare picks them up)
-├── papers/          YOUR past papers: one PDF, or one folder of photos, per paper
+├── notes/           your own notes or syllabus, if ktunotes has none
+├── papers/          your own question papers: one PDF, or one folder of photos, per paper
 └── predictor/
-    ├── FORECAST.md      study order, likely questions, likely paper
-    ├── syllabus/        official syllabus PDF + MODULES.md
+    ├── FORECAST.md      the study plan
+    ├── syllabus/        official syllabus + MODULES.md
     ├── model/           official model question paper
-    ├── subject.json     course, predecessors, exam pattern
-    ├── topics.json      topics with notes pages (auto-drafted, editable)
-    ├── papers.json      past questions with marks and topic tags (auto-drafted, editable)
-    ├── notes/           notes PDFs + text (img/ for scans)
-    └── pyq/             past papers + text, EXTRACTION.md (img/ for scans)
+    ├── notes/           downloaded notes
+    ├── pyq/             downloaded past papers
+    ├── topics.json      the topic list (you can edit it)
+    ├── papers.json      every past question, with marks and topics (you can edit it)
+    └── subject.json     course details and exam pattern
 ```
+
+To save your exam dates and study style for the agent, copy `references/student.example.md` to `references/student.md`. That file stays on your computer.
+
+</details>
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A[Course code or name] --> B[fetch: papers + notes]
-    B --> C[extract: questions + marks check]
-    B --> D[topics: notes sections<br/>or ktunotes topic list]
-    C --> E[autotag: question to topic<br/>by text similarity]
+    A[Your subject] --> B[Download syllabus, notes,<br/>past papers, model paper]
+    B --> C[Read every question<br/>and its marks]
+    B --> D[Make the topic list<br/>from syllabus + notes]
+    C --> E[Match each question<br/>to a topic]
     D --> E
-    E --> F[predict]
-    F --> G[FORECAST.md]
+    E --> F[Rank the topics]
+    F --> G[FORECAST.md:<br/>your study plan]
 ```
 
-`predict.py` blends two signals per topic:
+Each topic gets a score from two things:
+- **How big it is in the notes and syllabus.** This counts for 75% of the score. The new syllabus is what the setter follows.
+- **How often and how recently it came in past papers.** This counts for 25%. Old papers help, but the syllabus changes.
 
-| Signal | What it uses | Weight |
-|---|---|---|
-| History model | Logistic regression on how often and how recently a topic was asked, whether it was in the last paper, and the gap since | 0.25 |
-| Notes prior | How many notes pages the topic fills, plus a boost for topics in the official model paper | 0.75 |
+Topics in the official model paper get a boost.
 
-Questions are grouped into families of the same question across papers. Each family's chance of returning is scaled so that the expected number of repeats matches the reuse rate seen in past papers of the same exam type (regular or supplementary).
+It also checks its own sources:
+- **Every paper's marks must add up** to the KTU pattern. That's 60 marks for most courses, and 40 for project-based ones like Microcontrollers.
+- **Each "older version" of a course is checked against the new syllabus.** If its questions don't fit, the tool warns you. For example, an old 8085/8086 course is not a real predecessor of a new ARM course.
+- **The forecast starts with a list of what it actually used,** so you can see when something was missing.
 
-## Accuracy
+<details>
+<summary>More detail on the method</summary>
 
-The first check used KTU's first PCCST501 Computer Networks paper (Nov 2026, 60 marks).
-- **Method:** each version re-forecast that paper from pre-exam data only.
-- **Measure:** the share of its marks covered by studying the top-ranked part of the syllabus, sized by notes pages.
-- **Scoring:** the exam's questions were scored with hand-checked topic tags in every version, so automatic mistakes can't flatter the result.
+- **History:** a small logistic-regression model on how often a topic was asked, how recently, whether it was in the last paper, and the gap since.
+- **Notes and syllabus:** a prior that grows with a topic's notes pages, plus a boost for model-paper topics. The two signals are blended 25% history and 75% notes.
+- **Study order:** module-balanced.
+- **Likely questions:** the same question across years forms one family. Its chance of coming back is scaled to how often questions repeated in past papers of the same exam type (regular or supply).
+- **How accuracy is measured:** as above, by the share of the syllabus studied (sized by notes pages), against random topic choice. A question only counts if you studied every topic it needs, and studying is assumed to work. The full record is in `references/lessons.md`.
 
-| Topics and tags | 40% of syllabus studied | 60% of syllabus studied |
-|---|---|---|
-| **Automatic (`ktu.py prepare`)** | **50%** of marks (random: 35%) | **73%** (random: 49%) |
-| Hand-checked | 67% (random: 42%) | 83% (random: 57%) |
+</details>
 
-What the first check showed:
-- **The setter followed the new notes and textbook.** Every question was in the notes, and about half were reworded old-course questions.
-- **Topics drawn only from old papers missed new syllabus content** (14 of 60 marks).
-- **One automatic method was rejected:** topics from notes headings alone scored no better than random.
-- **Measuring by number of topics flatters coarse topic lists,** so this project measures by share of the syllabus.
-- **What the measure assumes:** a question counts only if you studied every topic it needs, and you are assumed to master what you study. It's a guide to which topics matter, not a predicted score.
+## Safety
 
-The second check was blind: the forecast was saved before anyone opened the paper. It used PCEOT501 Microcontrollers and Embedded Systems (Nov 2026), which is about as hard a case as the skill gets.
-- **It belongs to Electrical and Computer Engineering ("EO" in the code),** a branch new in the 2024 scheme. Its first batch sat this exam, so no past papers exist anywhere.
-- **ktunotes doesn't cover the branch yet:** no catalogue entry, notes, topic list or model paper.
-- **So the forecast came only from 7 papers of RAT206,** an older course from another branch.
+Past papers and notes are written by other people, and an AI agent reads what this tool makes from them. So the tool treats all of that text as study material, never as instructions:
+- **Downloads** only come from the few sites the tool needs, over https, with a size limit.
+- **Text that tries to give orders to an AI** (called "prompt injection") is hidden, and the agent is told about it.
+- **Hidden characters, links and images** in downloaded text are removed or made harmless.
+- **Downloaded file names** can't write outside the subject folder.
 
-Expect the same for any new branch: no papers until its first exams, and little on ktunotes for a while. The skill now asks for your own notes and papers, and points to similar courses in established branches whose notes can stand in.
+## Contributing
 
-| PCEOT501, papers only | 40% of syllabus studied | 60% | Everything in the list |
-|---|---|---|---|
-| Lenient tags | 58% of marks (random: 40%) | 77% (random: 57%) | 82% |
-| Strict tags | 45% (random: 26%) | 57% (random: 38%) | 57% |
-
-- **The ranking still beat random,** by about 18 points.
-- **The list could not contain what was new.** A whole ARM module (20 marks) and the 8051 programs and numericals (about 25 marks) never appeared in RAT206 papers.
-- **Similar courses would have helped.** The notes of PBECT404 (8051) and PBCST504 (ARM) covered almost all of it, and `setup` now suggests them. Their automatic topics were unusable, though, so build those topics by hand.
-- **The official syllabus helped most.** ktunotes' syllabus site had PCEOT501's syllabus, and every question on the paper was in it, ARM module included. With one topic per syllabus item plus the same old papers, studying 40% / 60% of the syllabus covered **67% / 90%** of marks (random: 49% / 68%), on strict tags. The parser was written after seeing this paper, so treat this as encouraging rather than a blind result. `prepare` now fetches the syllabus for every course.
-
-> [!IMPORTANT]
-> How well it works depends on the papers. Many KTU papers on ktunotes are scanned with noisy OCR. Their questions are drafted automatically and checked against the KTU marks pattern; scans with no text need transcribing, and `ktu.py status` lists them. Garbled drafts are left out of the forecast, and `FORECAST.md` warns when the data is too thin for the ranking to mean much.
-
-> [!WARNING]
-> That's two papers, and some settings were tuned while looking at the first one, so treat the numbers as rough. Predicting the exact wording of a question is weak. The value is in knowing which **topics** to cover, and in covering every module. No forecast replaces studying the notes.
-
-## Safety and contributing
-
-Past papers, notes and ktunotes pages are written by other people, and an AI agent reads what the skill makes from them. So the scripts treat all of it as data:
-- **Downloads** are https only, to the ktunotes, Google Drive and MBCET hosts the skill needs, with every redirect checked and a size limit.
-- **Text that addresses an AI agent** (prompt injection) is withheld from `papers.json`, `topics.json`, `OUTLINE.txt` and `FORECAST.md`, and `ktu.py status` reports it.
-- **Hidden characters are removed, and links, images and HTML are neutralised** in the forecast.
-- **File names** from Drive or your own folders can't escape the subject folder.
-
-The test suite checks all of this, plus the rules for pull requests: standard library only, one network call site, no shell, and plain agent-facing docs. It runs offline in about a second:
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. The tests check the safety rules too, and they run offline in about a second:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+The most useful contribution is a **real exam result**: save the forecast before the exam, then score it after. `SKILL.md` explains how.
 
 > [!NOTE]
-> This project is not affiliated with KTU or ktunotes.live. It downloads publicly shared files for personal study. Please respect the sources and their terms of use.
+> This project is not connected to KTU or ktunotes.live. It downloads publicly shared files for personal study. Please respect the sources and their terms of use.
