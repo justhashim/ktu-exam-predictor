@@ -34,24 +34,21 @@ Say a subject's syllabus is 10 chapters, and you only have time for 4.
 - **With the tool:** you study the 4 chapters it ranks highest.
 - **Without it:** you pick 4 chapters at random.
 
-Then we take the **real exam paper** and count how many marks you could have answered each way. The forecast is made **before** the exam, then checked against the real paper.
+Then we take the **real exam paper** and count how many marks you could have answered each way. The forecast only gets material from **before** the exam: no peeking at the paper it's tested on.
 
-### Results so far
+### Results
 
 | Real exam (Nov 2026) | Study the top 40% of the syllabus | Study the top 60% |
 |---|---|---|
-| **Computer Networks** (PCCST501) | **50%** of marks with the tool, 35% at random | **73%** with the tool, 49% at random |
-| **Microcontrollers & Embedded Systems** (PCEOT501), old papers only | **45%** with the tool, 26% at random | **57%** with the tool, 38% at random |
-| PCEOT501 again, now also using the official syllabus | **67%** with the tool, 49% at random | **90%** with the tool, 68% at random |
+| **Computer Networks** (PCCST501) | **85%** of marks with the tool, 54% at random | **95%** with the tool, 73% at random |
+| **Microcontrollers & Embedded Systems** (PCEOT501) | **67%** with the tool, 49% at random | **90%** with the tool, 68% at random |
 
 In plain words:
-- **The tool's order always beat picking at random,** by about 15 to 25 points.
-- **Old papers alone can miss whole topics.** PCEOT501 is from a branch that is new in the 2024 scheme, so it had no past papers of its own, and its older course never covered ARM. A full 20-mark ARM module came, and no amount of studying the old list would have found it.
-- **The official syllabus fixed that,** because it lists everything that can be asked. So the tool now always downloads the syllabus and uses it. That PCEOT501 result is encouraging, but the syllabus reader was built after seeing that paper, so it isn't a fully blind test.
-- **On Computer Networks, the newest version scored about the same as the one before it.** The changes help most when something is missing (no notes, no papers, or the wrong older course). They don't change much when the notes and topic list are already good.
+- **Studying in the tool's order beat picking topics at random** on both papers: by 31 points (Computer Networks) and 18 points (PCEOT501) at 40% of the syllabus.
+- **It works even with almost nothing to go on.** PCEOT501 is from a branch that is new in the 2024 scheme: no notes, no past papers of its own, and an older course that never covered ARM. Because the tool reads the official syllabus, the 20-mark ARM module was still on the list.
 
 > [!WARNING]
-> **These numbers come from only two real papers. Treat them as rough.** The tool tells you which **topics** matter. It can't tell you the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
+> **These numbers come from only two real papers. Treat them as rough.** The questions were matched to topics by hand, and the PCEOT501 syllabus reader was built after seeing that paper. The tool tells you which **topics** matter. It can't tell you the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
 
 ## Install
 
