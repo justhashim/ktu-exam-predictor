@@ -274,5 +274,138 @@ class TestSyllabus(unittest.TestCase):
         self.assertIn("items of the official syllabus", open(os.path.join(D, "FORECAST.md"), encoding="utf-8").read())
 
 
+class TestAllMaterials(unittest.TestCase):
+    """The syllabus, notes, past papers and model paper are all used together."""
+
+    SYL_40 = ("End Semester Examination Marks (ESE) Part A Part B Total Total of 8 Questions, each carrying 2 marks "
+              "(8x2 =16 marks) can have a maximum of 2 subdivisions. Each question carries 6 marks. (4x6 = 24 marks) 40")
+    SYL_60 = "End Semester Examination Marks (ESE) (8x3 =24 marks) (4x9 = 36 marks) 60"
+
+    def test_exam_pattern_from_syllabus(self):
+        self.assertEqual(fetch.syllabus_pattern(self.SYL_40),
+                         {"part_a": 8, "part_a_marks": 2, "part_b_marks": 6, "subq": 24})
+        self.assertEqual(fetch.syllabus_pattern(self.SYL_60)["subq"], 26)
+        self.assertIsNone(fetch.syllabus_pattern("no pattern here"))
+        self.assertIsNone(fetch.syllabus_pattern("(8x2 =17 marks) (4x6 = 24 marks)"))     # arithmetic must agree
+
+    def test_40_mark_papers_pass_the_check(self):
+        qs = qs_2024(a_marks=(2,) * 8, b=tuple((n, 3, 3) for n in range(9, 17)))
+        self.assertEqual(ex.check(qs), ("2024-40", []))
+        self.assertEqual(ktu.module_of("B11a", "2024-40"), 2)
+
+    def _subject(self, name, topics_page):
+        D = U.new_subject(name)
+        os.makedirs(os.path.join(D, "syllabus"))
+        open(os.path.join(D, "syllabus", "PCXXT501.pdf"), "wb").write(b"%PDF-1.4")
+        with mock.patch.object(fetch, "pdf_raw_text", return_value=U.SYLLABUS_RAW), \
+                mock.patch.object(ktu, "topics_page", return_value=topics_page):
+            ktu.draft_topics(D)
+        return D, json.load(open(os.path.join(D, "topics.json"), encoding="utf-8"))["topics"]
+
+    def test_syllabus_items_missing_from_the_topic_list_become_topics(self):
+        page = {"modules": [{"module": m, "topics": [{"name": n, "weightage": "High"} for n in names]} for m, names in (
+            (1, ["8051 architecture, register organization and SFRs", "Embedded systems and real time systems"]),
+            (2, ["8051 addressing modes and assembler directives"]),
+            (3, ["8051 interrupts and interrupt priority", "Serial port programming"]),
+            (4, ["ARM processor introduction"]))]}                      # no stepper motor, no RISC vs CISC
+        D, T = self._subject("gaps", page)
+        gaps = [t["name"] for t in T.values() if t.get("source") == "syllabus (not in topic list)"]
+        self.assertTrue(any("stepper" in g.lower() for g in gaps), gaps)
+        self.assertTrue(any("RISC" in g for g in gaps), gaps)
+        self.assertFalse(any("Interrupt priority" in g for g in gaps), "covered items are not repeated")
+        listed = [t for t in T.values() if t.get("source") == "ktunotes topics page"]
+        self.assertTrue(any(t.get("syllabus_items") for t in listed), "matched items enrich their topic")
+
+    def test_wrong_predecessor_is_flagged(self):
+        D, _ = self._subject("fit", None)
+        chips = ["Explain the architecture of the 8086 microprocessor.", "Explain the 8255 PPI modes.",
+                 "Write an 8085 program to add two numbers.", "Explain the 8254 timer modes.",
+                 "Explain the pin diagram of 8086.", "Explain 8259 interrupt controller.",
+                 "Write an 8086 ALP to sort numbers.", "Explain the 8085 flag register.", "Explain 8279 keyboard."]
+        good = ["Explain the 8051 interrupts and interrupt priority.", "Explain the ARM operating modes.",
+                "Explain the 8051 addressing modes.", "Explain the SFRs of 8051.", "Explain RISC vs CISC in ARM."] * 2
+        P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
+        P["papers"] = [{"id": "OLD1", "label": "Jun 2023", "course": "XX307", "type": "regular",
+                        "questions": [{"q": f"A{i}", "marks": 3, "text": t} for i, t in enumerate(chips, 1)]},
+                       {"id": "OLD2", "label": "Jun 2024", "course": "YY206", "type": "regular",
+                        "questions": [{"q": f"A{i}", "marks": 3, "text": t} for i, t in enumerate(good, 1)]}]
+        json.dump(P, open(os.path.join(D, "papers.json"), "w"))
+        with mock.patch.object(fetch, "pdf_raw_text", return_value=U.SYLLABUS_RAW):
+            fit = ktu.predecessor_fit(D)
+            warn = ktu.fit_warnings(D)
+        self.assertTrue(fit["XX307"]["unfit"], fit)
+        self.assertFalse(fit["YY206"]["unfit"], fit)
+        self.assertEqual(len(warn), 1)
+        self.assertIn("--skip-old XX307", warn[0])
+
+    def test_platform_names(self):
+        self.assertEqual(ktu.platforms("STM32U575 and Cortex-M33 with FreeRTOS"), {"stm32", "cortex", "freertos"})
+        self.assertEqual(ktu.platforms("MCS-51 and 8052"), {"8051"})
+        self.assertEqual(ktu.platforms("Explain Dijkstra's algorithm"), set())
+
+    def test_skip_old_is_remembered(self):
+        info = {"code": "PCXXT504", "name": "Microcontrollers", "sem": "S5", "branch": "CSE", "alternatives": [],
+                "old_codes": ["XX307", "YY206"], "short": "MCX", "old_detail": {"XX307": {}, "YY206": {}}}
+        seen = []
+
+        def plist(codes, sem):
+            seen.append(list(codes))
+            return []
+        common = [mock.patch.object(fetch, "resolve", side_effect=lambda *a, **k: json.loads(json.dumps(info))),
+                  mock.patch.object(fetch, "paper_list", side_effect=plist),
+                  mock.patch.object(fetch, "cmd_notes", side_effect=SystemExit("none")),
+                  mock.patch.object(fetch, "cmd_syllabus", return_value=None),
+                  mock.patch.object(fetch, "cmd_model", return_value=None)]
+        for p in common:
+            p.start()
+        try:
+            D, _ = quiet(fetch.cmd_setup, "PCXXT504", skip_old=["XX307"])
+            quiet(fetch.cmd_setup, "PCXXT504")                             # no flag the second time
+        finally:
+            for p in common:
+                p.stop()
+        self.assertEqual(seen, [["PCXXT504", "YY206"], ["PCXXT504", "YY206"]])
+        self.assertEqual(json.load(open(os.path.join(D, "subject.json")))["skip_old"], ["XX307"])
+
+    def test_model_paper_is_fetched_and_added(self):
+        common = '<a href="https://drive.google.com/file/d/COMMONCOMMONCOMMONCOMMON1/view">'
+        pages = {"https://model.ktunotes.live/pcxxt505": "<title>PCXXT505: Test | KTU Model Question Paper</title>"
+                 + common + '<a href="https://drive.google.com/file/d/MODELPDFMODELPDFMODELPDF1/view">',
+                 "https://syllabus.ktunotes.live/": "<title>KTU Syllabus</title>" + common}
+        info = {"code": "PCXXT505", "name": "Test", "sem": "S5", "branch": "CSE", "alternatives": [],
+                "old_codes": [], "short": "TST", "old_detail": {}}
+        got = []
+        with mock.patch.object(fetch, "get", side_effect=lambda u, **k: pages[u]), \
+                mock.patch.object(fetch, "download_drive", side_effect=lambda i, p: got.append(i) or
+                                  open(p, "wb").write(b"%PDF") or True), \
+                mock.patch.object(fetch, "to_text", return_value="scanned"), \
+                mock.patch.object(fetch, "resolve", return_value=info), \
+                mock.patch.object(fetch, "paper_list", return_value=[]), \
+                mock.patch.object(fetch, "cmd_notes", side_effect=SystemExit("none")), \
+                mock.patch.object(fetch, "cmd_syllabus", return_value=None):
+            D, out = quiet(fetch.cmd_setup, "PCXXT505")
+        self.assertEqual(got, ["MODELPDFMODELPDFMODELPDF1"])
+        P = json.load(open(os.path.join(D, "papers.json")))["papers"]
+        self.assertEqual([(p["id"], p.get("model"), p["course"]) for p in P], [("MODEL_PCXXT505", True, "PCXXT505")])
+        with mock.patch.object(fetch, "get", return_value="<title>KTU Model Papers</title>"):
+            self.assertIsNone(fetch.cmd_model("PCZZT999", D))
+
+    def test_model_paper_topics_get_the_boost_and_materials_are_listed(self):
+        D, T = self._subject("model_boost", None)
+        key = next(k for k, t in T.items() if t.get("module") == 4)
+        P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
+        P["papers"] = [{"id": "MODEL_PCXXT501", "label": "Model paper", "course": "PCXXT501", "type": "regular",
+                        "model": True, "questions": [{"q": "A7", "marks": 3, "topics": [key], "text": "ARM modes"}]}]
+        json.dump(P, open(os.path.join(D, "papers.json"), "w"))
+        import predict
+        _, _, topics, _ = predict.load(D)
+        self.assertTrue(topics[key]["model"])
+        r = subprocess.run([sys.executable, os.path.join(U.SCRIPTS, "predict.py"), D], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        F = open(os.path.join(D, "FORECAST.md"), encoding="utf-8").read()
+        self.assertIn("Materials used: syllabus yes", F)
+        self.assertIn("model paper yes (1 questions)", F)
+
+
 if __name__ == "__main__":
     unittest.main()

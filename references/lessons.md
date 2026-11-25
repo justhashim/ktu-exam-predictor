@@ -83,3 +83,13 @@ The ranking beat random by about 18 points. The ceiling was the problem: what th
 - **Caveat:** the parser was written after seeing the paper, so this is not a blind result.
 - **How to apply:** `prepare` fetches the syllabus for every course (`syllabus/`, `MODULES.md`). With no notes, its items become the topics. Check `MODULES.md`, because a module number in the table can land a few lines off (here the 8051 Timer heading went to module 2; the paper also asked timer questions in module 2).
 
+# Use every source together (PBCST504 setup, 25 Nov 2026)
+
+Setting up PBCST504 Microcontrollers showed what a single source misses:
+- **The syllabus said the exam is 40 marks** (8 × 2 + 4 × 6, a project-based course), not the assumed 60. The marks check and the assembled paper were wrong until this was read.
+- **The older course was a different subject.** CST307 (8085/8086/8051, 8254/8255) was picked by name, but PBCST504 is ARM Cortex-M / STM32, and its old questions became the "likely questions". Word overlap alone doesn't catch this, because microcontroller courses share "interrupt", "timer" and "serial". Chip names do: RAT206 (8051/Arduino) against the ARM syllabus had 93% of its chip-naming questions about chips the syllabus never names, against 40% for its real successor PCEOT501.
+- **The official model paper showed the style:** STM32 HAL code, baud-rate timing, CAN frame IDs and FreeRTOS `xTaskCreate` parameters. That is more programming than the notes suggest.
+- **The ktunotes topic list misses syllabus items.** For DAA, the syllabus check found Disjoint Sets / Union-Find, Randomized Algorithms (Monte Carlo, Las Vegas) and Bin Packing missing from the list.
+
+**How to apply:** `prepare` now fetches the syllabus and model paper for every course, applies the syllabus exam pattern, adds uncovered syllabus items as topics, warns when an older course doesn't fit (`--skip-old`), and lists the materials used at the top of `FORECAST.md`. Calibration: the right predecessors scored 69–95% syllabus match; wrong ones scored 10–17%, or showed 87–93% chip mismatch. That's 7 pairs plus drafted (OCR) papers, so it's a guide, not a guarantee.
+

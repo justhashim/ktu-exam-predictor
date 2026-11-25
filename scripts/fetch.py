@@ -201,6 +201,48 @@ def cmd_syllabus(code, D):
     return pdf
 
 
+def syllabus_pattern(text):
+    """The end-semester exam pattern from a KTU 2024 syllabus, e.g. "(8x2 =16 marks)" and "(4x6 = 24 marks)" ->
+    {"part_a": 8, "part_a_marks": 2, "part_b_marks": 6, "subq": 24}. Project-based (PB) courses have a 40-mark
+    exam (8 x 2 + 4 x 6), not the usual 60 (8 x 3 + 4 x 9). None if the text doesn't say."""
+    t = re.sub(r"\s+", " ", safety.clean_text(text or ""))
+    i = t.lower().find("end semester examination")
+    hits = re.findall(r"\(\s*(\d{1,2})\s*[x\u00d7*]\s*(\d{1,2})\s*=\s*(\d{1,3})\s*marks?\s*\)", t[i:] if i >= 0 else t, re.I)
+    if len(hits) < 2:
+        return None
+    (na, ma, ta), (nb, mb, tb) = [tuple(map(int, h)) for h in hits[:2]]
+    if na * ma != ta or nb * mb != tb or not (4 <= na <= 12 and 2 <= nb <= 6):
+        return None
+    # sub-questions on a paper: Part A, plus two questions per module of about two parts each (9-mark ones a bit more)
+    return {"part_a": na, "part_a_marks": ma, "part_b_marks": mb, "subq": na + 4 * nb + (2 if mb >= 9 else 0)}
+
+
+def cmd_model(code, D):
+    """The official model question paper from model.ktunotes.live, saved as D/model/<CODE>_model.pdf (scanned pages
+    rendered to model/img/). Returns the PDF path or None. It is the only paper a brand-new course has, and it
+    shows the setter's style (e.g. PBCST504: STM32 HAL code and short calculations)."""
+    try:
+        page = get(f"https://model.ktunotes.live/{code.lower()}", timeout=60)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    title = re.search(r"<title>(.*?)</title>", page, re.S)
+    if not title or code.upper() not in title.group(1).upper():
+        return None
+    common = set(syllabus_ids(get("https://syllabus.ktunotes.live/", timeout=60)))
+    ids = [i for i in syllabus_ids(page) if i not in common]
+    if not ids:
+        return None
+    md = os.path.join(D, "model")
+    os.makedirs(md, exist_ok=True)
+    pdf = safety.safe_join(md, f"{code.upper()}_model.pdf")
+    if not os.path.exists(pdf) and not download_drive(ids[0], pdf):
+        return None
+    to_text(pdf, os.path.join(md, "img"), min_total=3000)
+    return pdf
+
+
 def syllabus_modules(raw):
     """{module: [syllabus lines]} from the raw text of a KTU 2024 syllabus. The table holds module numbers as
     lone lines, in order (1, 2, 3, ...); other lone numbers are contact hours. A number centred in a tall cell
@@ -635,7 +677,7 @@ def ingest_user_files(D, code):
     return added_notes, papers
 
 
-def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
+def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=(), skip_old=()):
     info = resolve(query, extra_old, name)
     sm = STUDY
     os.makedirs(sm, exist_ok=True)
@@ -647,6 +689,12 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
     folder = folder or short or info["short"]
     D = os.path.join(sm, folder, "predictor")
     os.makedirs(D, exist_ok=True)
+    sj0 = os.path.join(D, "subject.json")              # predecessors ruled out earlier stay out (--skip-old)
+    skip = {c.upper() for c in skip_old} | set((json.load(open(sj0, encoding="utf-8")) if os.path.exists(sj0) else {})
+                                               .get("skip_old", []))
+    if skip:
+        info["old_codes"] = [c for c in info["old_codes"] if c not in skip]
+        info["old_detail"] = {c: v for c, v in info["old_detail"].items() if c not in skip}
     print(f"Course: {info['code']} {info['name']} ({info['branch']} {info['sem']})  -> {D}")
     if info["alternatives"]:
         print("  NOTE: the name also matches:", "; ".join(info["alternatives"]),
@@ -689,6 +737,12 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
         print(f"\nSyllabus: {os.path.relpath(syl, D)} ({n} modules) -> syllabus/MODULES.md")
     elif syl is None:
         print("\nSyllabus: none on syllabus.ktunotes.live")
+    model = None
+    try:
+        model = cmd_model(info["code"], D)
+    except Exception as e:
+        print("\nModel paper: not fetched:", str(e)[:120])
+    print(f"\nModel paper: {os.path.relpath(model, D)}" if model else "\nModel paper: none on model.ktunotes.live")
     print("\nOwn files (the student's notes/ and papers/ folders):")
     own_notes, own_papers = ingest_user_files(D, info["code"])
     if not own_notes and not own_papers:
@@ -697,7 +751,10 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
     U = os.path.dirname(D)
     missing = ([] if notes_ok or sib or own_notes else ["notes"]) + ([] if n_papers else ["past papers"])
     if missing:
-        cands = siblings(info["code"], info["name"]) if "notes" in missing else []
+        try:                                               # a hint only: never fail setup over it
+            cands = siblings(info["code"], info["name"]) if "notes" in missing else []
+        except Exception:
+            cands = []
         print(f"\n== ASK THE USER: ktunotes has no {' and no '.join(missing)} for {info['code']}.\n"
               f"   Ask the student to download them (college portal, classmates, the department, the KTU syllabus PDF)\n"
               f"   and put them in these folders, then run prepare again:\n"
@@ -714,6 +771,15 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
     cfg = json.load(open(sj, encoding="utf-8")) if os.path.exists(sj) else {}
     if sib:
         cfg["notes_from"] = sorted(set(cfg.get("notes_from", [])) | set(sib))
+    if skip:
+        cfg["skip_old"] = sorted(skip)
+    pat = syllabus_pattern(open(syl[:-4] + ".txt", encoding="utf-8", errors="replace").read()) \
+        if syl and os.path.exists(syl[:-4] + ".txt") else None
+    if pat and str(cfg.get("_pattern_note", "assumed")).startswith("assumed"):
+        cfg["pattern"] = pat
+        cfg["_pattern_note"] = (f"from the syllabus: {pat['part_a']} x {pat['part_a_marks']} + "
+                                f"{cfg.get('modules', 4)} modules x {pat['part_b_marks']}")
+        print("Exam pattern", cfg["_pattern_note"])
     cfg.update({"code": info["code"], "name": info["name"], "short": folder, "old_codes": info["old_codes"],
                 "semester": info["sem"]})
     if is_old_code(info["code"]):     # a 2019-scheme (or older) course: 10 x 3 + 5 modules x 14
@@ -736,6 +802,9 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
         if r["pid"] not in have and "FAILED" not in st:
             P["papers"].append({"id": r["pid"], "label": r["label"], "type": r["type"], "course": r["code"],
                                 "source": "pyq/" + r["file"], "questions": []})
+    if model and "MODEL_" + info["code"] not in have:     # the model paper counts as a paper of this course
+        P["papers"].append({"id": "MODEL_" + info["code"], "label": "Model paper", "type": "regular",
+                            "course": info["code"], "model": True, "source": os.path.relpath(model, D), "questions": []})
     for p in own_papers:
         st = p.pop("_status")
         if p["id"] not in have:
@@ -783,7 +852,8 @@ if __name__ == "__main__":
     if a[0] == "setup":
         olds = [a[i + 1] for i, x in enumerate(a) if x == "--old"]
         sibs = [a[i + 1] for i, x in enumerate(a) if x == "--notes-from"]
-        cmd_setup(a[1], int(opt("--papers", 10)), olds, opt("--short"), opt("--name"), sibs)
+        skips = [a[i + 1] for i, x in enumerate(a) if x == "--skip-old"]
+        cmd_setup(a[1], int(opt("--papers", 10)), olds, opt("--short"), opt("--name"), sibs, skips)
     elif a[0] == "resolve":
         olds = [a[i + 1] for i, x in enumerate(a) if x == "--old"]
         skip = {i + 1 for i, x in enumerate(a) if x in ("--old", "--name")}

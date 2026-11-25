@@ -27,17 +27,24 @@ Everything the scripts download (papers, notes, ktunotes pages, Drive file names
 python3 $S/ktu.py prepare "<code or name>" --label "<Mon YYYY>"     # add --type supplementary for supply exams
 ```
 
-It does the following, printing what it did at each step:
+It uses every source it can find, together: the **syllabus**, the **notes**, the **past papers** and the **model paper**. Step by step, printing what it did:
 1. Finds the course and its older-scheme versions (e.g. PCCST502 → CST306).
-2. Downloads the 10 most recent distinct papers, the ktunotes notes, and the official syllabus. The syllabus goes in `syllabus/`, with its modules in `syllabus/MODULES.md`.
-3. Drafts every question with its marks.
-4. Drafts topics:
+2. Downloads:
+   - the 10 most recent distinct papers
+   - the ktunotes notes
+   - the official syllabus, into `syllabus/` with its modules in `syllabus/MODULES.md`
+   - the official model question paper, into `model/`; it's added as a paper of this course
+3. Reads the exam pattern from the syllabus. Project-based (PB) courses have a 40-mark exam (8 × 2 + 4 × 6), not the usual 60.
+4. Drafts every question with its marks.
+5. Drafts topics:
    - the ktunotes important-topics list
    - plus notes sections that list misses
-   - for modules with neither, one topic per syllabus item
+   - plus syllabus items that no topic covers; matched items also sharpen tagging
+   - for modules with no list and no notes, one topic per syllabus item
    - plus an "off-syllabus" bucket for old-course questions that match nothing
-5. Auto-tags questions to topics, and splits topics that are too coarse into subtopics built from groups of similar past questions.
-6. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`).
+6. Checks each older course against the syllabus. A similar name can hide a different course (CST307, an 8085/8086 course, behind PBCST504, an ARM course). When most of its questions don't fit, it prints `WARNING: ... looks like a different course`.
+7. Auto-tags questions to topics, and splits topics that are too coarse into subtopics built from groups of similar past questions. Topics the model paper asks get the model-paper boost.
+8. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`), starting with a "Materials used" line.
    - The study dir is `$KTU_STUDY_DIR`, else `~/Documents/Study Materials` if it exists, else `~/KTU Exams`.
 
 **A code missing from the ktunotes catalogue** (often a branch new in the 2024 scheme, e.g. PCEOT501 of Electrical and Computer Engineering, with no papers yet) stops with a message. Read the course name from the question paper or ask, then rerun with `--name "<course name>"`.
@@ -50,6 +57,8 @@ It does the following, printing what it did at each step:
   - Use the predecessor papers.
   - Add `--notes-from CODE` for the similar courses it lists; their notes stand in for the syllabus. Build their topics by hand from `notes/OUTLINE.txt`, since automatic topics from such notes were unusable.
   - Tell the student plainly that content new to this syllabus can't appear in the forecast.
+
+**When it warns that an older course looks different,** confirm with the student, then rerun `prepare` with `--skip-old CODE`. This is remembered in `subject.json`. Then delete that course's papers from `papers.json`.
 
 **Check the course and predecessors it printed.** If the name matched several courses, a `NOTE: the name also matches` line lists them; rerun with the exact code if needed. A similarly named course with different content (an ECE version, say) adds noise. Rerun with `--old CODE` to force a predecessor, then delete the wrong papers from `papers.json` and `pyq/`.
 
@@ -93,8 +102,8 @@ When they appear, the ranking is weak: tell the student so and cover every modul
 So the automatic version is useful but not as good as a checked one. `FORECAST.md` warns when a module's ranking is too flat to trust.
 
 **What to fix, highest value first.** Re-run `python3 $S/ktu.py predict "<course>"` after any of these:
-1. **Scanned papers** (no questions):
-   - read `pyq/img/*.png` or the PDF
+1. **Scanned papers** (no questions), including the model paper:
+   - read `pyq/img/*.png` (model paper: `model/img/`) or the PDF
    - write `questions[]` in `papers.json`: `{"q": "A1"|"B11a", "marks": 3, "topics": [], "text": "..."}`
    - run `python3 $S/ktu.py autotag "<course>"`
 2. **Papers that failed the marks check** (`pyq/EXTRACTION.md`):

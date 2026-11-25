@@ -13,6 +13,7 @@ rebuild the numbering (Part A: A1..An; Part B: B<n><a|b|c>, starting after the l
 Every paper gets a check against the KTU pattern:
   2019 scheme: Part A 10 x 3, Part B 5 modules, each question = 14 marks
   2024 scheme: Part A  8 x 3, Part B 4 modules, each question =  9 marks
+  2024 project-based (PB) courses, 40 marks: Part A 8 x 2, Part B 4 modules, each question = 6 marks
 Papers that fail the check, or have no text layer, are marked "review" in papers.json and listed in
 SUBJECT_DIR/pyq/EXTRACTION.md, so they can be corrected from the PDF or the page images in pyq/img/.
 """
@@ -162,6 +163,8 @@ def check(qs):
         scheme, per = "2019", 14
     elif len(A) == 8 and all(q["marks"] == 3 for q in A):
         scheme, per = "2024", 9
+    elif len(A) == 8 and all(q["marks"] == 2 for q in A):
+        scheme, per = "2024-40", 6            # project-based (PB) courses: 40 marks, 8 x 2 + 4 x 6
     else:
         scheme, per = "?", None
         probs.append(f"Part A has {len(A)} items with marks {[q['marks'] for q in A]}")
@@ -255,7 +258,8 @@ def main():
             p["type"] = ht
         if len(text) < 3000:
             p.update({"questions": [], "auto": True, "extract_status": "review: scanned or no text - transcribe from pyq/img"})
-            report.append(f"- **{p['label']}**: SCANNED / little text -> transcribe from `pyq/img/` images")
+            report.append(f"- **{p['label']}**: SCANNED / little text -> transcribe from "
+                          f"`{os.path.dirname(src or 'pyq/x') or 'pyq'}/img/` images")
             continue
         lines = clean_lines(text)
         a, b = split_parts(lines)

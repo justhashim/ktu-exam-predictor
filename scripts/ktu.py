@@ -182,9 +182,19 @@ def syllabus_topics(D):
         for g in groups:
             if g == safety.WITHHELD:
                 continue
-            h = re.match(r"^([^:]{3,70}):\s*(.*)$", g)
+            g = re.sub(r"\((?:Book|Text|Textbook|Ref|Reference|TB|RB)\s*[\w .,;-]*\)", "", g, flags=re.I)  # book refs
+            g = re.sub(r"(?i)^(hands-on|lab|case stud(?:y|ies)|demo)\s*:\s*", "", g).strip()
+            h = re.match(r"^([^:]{3,70}):\s*(.*)$", g) or \
+                re.match(r"^([A-Z][^:,;\u2013-]{2,50}?)\s+[\u2013-]\s+(.*)$", g)      # "Greedy Strategy - items"
             head, rest = (h.group(1).strip(), h.group(2)) if h else ("", g)
-            parts = re.split(r"\s*[,;:]\s+|\.\s+|\s+[\u2013-]\s*|[\u2013-]\s+|(?<=[A-Za-z0-9)])[\u2013-](?=[A-Z])|(?<=[A-Z][A-Z])-(?=[a-z]{4,})|\s*\u2013\s*", rest)
+            depth, masked = 0, []
+            for ch in rest:                                  # never split inside (...)
+                depth += (ch == "(") - (ch == ")")
+                masked.append("\x00" if depth > 0 and ch in ",;:" else ch)
+            rest = "".join(masked)
+            parts = re.split(r"\s*[,;:]\s+|\.\s+|\s+[\u2013-]\s*|(?<=[a-z])[\u2013-]\s+|(?<=[a-z0-9)])[\u2013-](?=[A-Z])|(?<=[A-Z]{3})-(?=[A-Z][a-z]{3,})|"
+                             r"(?<=[A-Z][A-Z])-(?=[a-z]{4,})|\s*\u2013\s*", rest)
+            parts = [x.replace("\x00", ",") for x in parts]
             items = []
             for it in (re.sub(r"(?i)\s+(and|or)$", "", x.strip(" .,-\u2013")) for x in parts):
                 if not it or it.lower() in ("etc", "and") or re.fullmatch(r"[\d\W]+", it):
@@ -195,6 +205,31 @@ def syllabus_topics(D):
                     items.append(it)
             for it in items or [head]:
                 out.append((m, it[:90], head))
+    return out
+
+
+SYL_GAP_SIM = 0.10     # a syllabus item this unlike every topic of its module is missing from the topic list
+
+
+def syllabus_match(D, topics):
+    """Each syllabus item against the drafted topics: [(module, item, heading, best similarity, best topic key)].
+    Compared within the item's module first, then across all modules (notes and syllabus can number modules
+    differently)."""
+    items = syllabus_topics(D)
+    keys = [k for k in topics if topics[k].get("module")]
+    if not items or not keys:
+        return []
+    docs = [toks((topics[k]["name"] + " ") * 3 + " ".join(topics[k].get("examples", [])[:6])) for k in keys]
+    vec = tfidf(docs + [toks(it + " " + h) for _, it, h in items])
+    tv, iv = vec[:len(keys)], vec[len(keys):]
+    out = []
+    for (m, it, h), v in zip(items, iv):
+        sims = [(cos(v, tv[j]), k) for j, k in enumerate(keys)]
+        same = [x for x in sims if topics[x[1]]["module"] == m]
+        best = max(same or sims)
+        if best[0] < SYL_GAP_SIM:
+            best = max(sims)
+        out.append((m, it, h, round(best[0], 3), best[1]))
     return out
 
 
@@ -297,6 +332,17 @@ def draft_topics(D, redo=False):
                 t[field] = [f"M{t['module']}:{a}-{b}" if a != b else f"M{t['module']}:{a}" for _, a, b in rr]
             if rr:
                 t[field + "_src"] = rr      # [notes file, first page, last page]
+    # 3a) the syllabus against the topics so far: items no topic covers become topics (the ktunotes list and the
+    #     notes can both miss syllabus content); matched items join their topic's text, which sharpens tagging.
+    if topics:
+        for m, item, head, sc, k in syllabus_match(D, topics):
+            if sc >= SYL_GAP_SIM:
+                topics[k].setdefault("syllabus_items", []).append(item)
+            elif m in mods:
+                name = item if len(item.split()) >= 3 or not head else f"{head}: {item}"
+                add(f"M{m}_{item}", {"name": name, "module": m, "syllabus": "in", "model": False, "notes": [],
+                                     "weight_hint": 0.6, "examples": [head] if head else [],
+                                     "source": "syllabus (not in topic list)"})
     # 3b) modules still without topics, and a syllabus: one topic per syllabus item. Better than past-question
     #     clusters: it lists what is new to the course (PCEOT501's ARM module was in its syllabus, in no old paper).
     have = {t["module"] for t in topics.values()}
@@ -352,11 +398,81 @@ def draft_topics(D, redo=False):
     return src
 
 
+# ------------------------------------------------------------------ do the older courses fit this syllabus?
+FIT_SIM = 0.12        # a past question this unlike every syllabus item is not about this course's syllabus
+FIT_MIN = 0.5         # a predecessor with fewer of its questions matching the syllabus is the wrong course
+PLATFORM_MIN, PLATFORM_OFF = 8, 0.6   # ... or one whose chip-naming questions mostly name chips the syllabus lacks
+PLATFORMS = re.compile(r"(?i)\b(80(?:85|86|88|51|31|52|386|486)|82(?:55|54|59|79|51|57)|z80|68000|pic(?:16|18)?|avr|"
+                       r"atmega\w*|arduino|esp(?:8266|32)|msp430|stm32\w*|cortex[- ]?m\d*|arm\s?(?:v\d|7|9|11)?|"
+                       r"raspberry\s+pi|freertos|rtos|mcs-?51)\b")
+
+
+def platforms(text):
+    """Chip and platform names in a text, normalised (8031/8052/MCS-51 -> 8051, STM32U575 -> stm32, ...)."""
+    out = set()
+    for m in PLATFORMS.finditer(text or ""):
+        w = re.sub(r"[\s-]", "", m.group(1).lower())
+        w = {"mcs51": "8051", "8031": "8051", "8052": "8051", "8088": "8086"}.get(w, w)
+        for pat, rep_ in (("^stm32.*", "stm32"), ("^atmega.*", "atmega"), ("^cortexm\\d*", "cortex"), ("^arm.*", "arm")):
+            w = re.sub(pat, rep_, w)
+        out.add(w)
+    return out
+
+
+def predecessor_fit(D):
+    """{old code: {...}} for every older-course paper, judged against this course's syllabus (or, without one, its
+    topics): the share of its questions that match a syllabus item, and for microprocessor-type courses the share
+    of chip-naming questions about chips the syllabus never mentions. A similar name can hide a different course:
+    CST307 (8085/8086/8051) behind PBCST504 (ARM Cortex-M / STM32)."""
+    cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
+    P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))["papers"]
+    qs = [(p["course"], q["text"]) for p in P if p.get("course") and p["course"] != cfg["code"]
+          and not p.get("duplicate_of") for q in p.get("questions", []) if q.get("text")]
+    items = syllabus_topics(D)
+    ref = [it + " " + h for _, it, h in items]
+    sd = os.path.join(D, "syllabus")
+    syl_text = " ".join(open(os.path.join(sd, f), encoding="utf-8", errors="replace").read()
+                        for f in os.listdir(sd) if f.endswith(".txt")) if os.path.isdir(sd) else ""
+    if not ref:
+        tj = os.path.join(D, "topics.json")
+        T = json.load(open(tj, encoding="utf-8"))["topics"] if os.path.exists(tj) else {}
+        ref = [t["name"] + " " + " ".join(t.get("examples", [])) for t in T.values() if t.get("module")]
+    if not qs or not ref:
+        return {}
+    have = platforms(syl_text or " ".join(ref))
+    vec = tfidf([toks(r) for r in ref] + [toks(t) for _, t in qs])
+    rv, qv = vec[:len(ref)], vec[len(ref):]
+    acc = {}
+    for (code, text), v in zip(qs, qv):
+        a = acc.setdefault(code, [0, 0, 0, 0])
+        a[0] += 1
+        a[1] += max(cos(v, r) for r in rv) >= FIT_SIM
+        pl = platforms(text)
+        if pl:
+            a[2] += 1
+            a[3] += not (pl & have)
+    out = {}
+    for code, (n, hit, k, off) in acc.items():
+        fit, poff = round(hit / n, 2), round(off / k, 2) if k else 0.0
+        why = (f"only {fit:.0%} of its questions match the syllabus" if fit < FIT_MIN else
+               f"{poff:.0%} of its chip-specific questions are about chips the syllabus never mentions"
+               if k >= PLATFORM_MIN and poff >= PLATFORM_OFF else "")
+        out[code] = {"questions": n, "syllabus_match": fit, "chip_questions": k, "chip_mismatch": poff,
+                     "unfit": bool(why), "reason": why}
+    return out
+
+
+def fit_warnings(D):
+    return [f"{c} looks like a different course: {f['reason']}. Its papers will mislead the forecast; rerun prepare "
+            f"with --skip-old {c} (and check with the student)." for c, f in predecessor_fit(D).items() if f["unfit"]]
+
+
 # ------------------------------------------------------------------ auto-tagging
 def module_of(qid, scheme):
-    """Module of a question from its number. 2024 scheme: A1-2 -> M1 ..., B9/10 -> M1 ... (4 modules).
-    2019 scheme: A1-2 -> M1 ..., B11/12 -> M1 ... (5 modules). None if unknown."""
+    """Module of a question from its number. 2024 scheme (60 or 40 marks): A1-2 -> M1 ..., B9/10 -> M1 ...
+    (4 modules). 2019 scheme: A1-2 -> M1 ..., B11/12 -> M1 ... (5 modules). None if unknown."""
     m = re.match(r"([AB])(\d+)", qid or "")
+    scheme = "2024" if scheme == "2024-40" else scheme
     if not m or scheme not in ("2024", "2019"):
         return None
     n = int(m.group(2))
@@ -388,7 +504,7 @@ def autotag(D, retag=False):
     docs = []
     for k in keys:
         t = T[k]
-        txt = (t["name"] + " ") * 3 + " ".join(t.get("examples", []))
+        txt = (t["name"] + " ") * 3 + " ".join(t.get("examples", [])) + " " + " ".join(t.get("syllabus_items", []))
         for f, a_, b_ in t.get("notes_src", []) + t.get("notes_see_src", []):
             for i in range(a_, b_ + 1):
                 txt += " " + pages.get((f, i), "")[:1500]
@@ -585,7 +701,9 @@ def status(D, quiet=False):
     for t in T.values():
         if t.get("module"):
             srcs[t.get("source", "hand-written")] = srcs.get(t.get("source", "hand-written"), 0) + 1
+    import predict                                      # noqa: E402  (shared summary of what was used)
     L = [f"{cfg['name']} ({cfg['code']})  ->  {D}",
+         "  " + predict.materials_line(predict.materials(D, cfg, [p for p in used if p.get("course")])),
          f"  papers: {len(used)} with questions ({len(ok)} clean, {len(review)} drafted with problems), "
          f"{len(empty)} without questions, {len(dups)} duplicates skipped",
          f"  questions: {len(qs)} ({sum(1 for q in qs if q.get('auto_tag'))} auto-tagged, {len(lowc)} low-confidence, "
@@ -603,6 +721,8 @@ def status(D, quiet=False):
     if any(t.get("source") == "syllabus" for t in T.values()):
         todo.append("topics come from the syllabus: check syllabus/MODULES.md against the PDF (a module number can "
                     "land a few lines off) and fix `module` in topics.json where a line sits in the wrong module")
+    for w in fit_warnings(D):
+        todo.append("ASK THE USER: " + w)
     withheld = [f"{p['id']} {q['q']}" for p in used for q in p.get("questions", []) if q.get("text") == safety.WITHHELD]
     if withheld:
         todo.append(f"SECURITY: {len(withheld)} question(s) held text aimed at an AI agent and were withheld ("
@@ -643,6 +763,8 @@ def main():
     ap.add_argument("--old", action="append", default=[], help="force a predecessor course code (repeatable)")
     ap.add_argument("--short", default=None, help="subject folder name, e.g. MC")
     ap.add_argument("--name", default=None, help="course name, for a code missing from the ktunotes catalogue")
+    ap.add_argument("--skip-old", action="append", default=[], dest="skip_old",
+                    help="leave out a wrong predecessor course (repeatable; remembered in subject.json)")
     ap.add_argument("--notes-from", action="append", default=[], dest="notes_from",
                     help="also fetch the notes of a similar course (repeatable), for a course with no notes of its own")
     ap.add_argument("--type", default="regular", choices=["regular", "supplementary"])
@@ -653,7 +775,7 @@ def main():
     pargs = ["--type", a.type] + (["--label", a.label] if a.label else [])
     if a.command == "prepare":
         print("== 1/5 fetch papers and notes")
-        D = fetch.cmd_setup(a.subject, a.papers, a.old, a.short, a.name, a.notes_from)
+        D = fetch.cmd_setup(a.subject, a.papers, a.old, a.short, a.name, a.notes_from, a.skip_old)
         if not text_tool():
             print("\nWARNING: no PDF text tool (pdftotext or pypdf). Papers and notes were downloaded but cannot be read,"
                   "\nso there will be no questions. Install poppler-utils (or `pip install pypdf`) and run prepare again.")
@@ -664,6 +786,8 @@ def main():
             print(open(rep, encoding="utf-8").read().split("\n", 4)[-1][:2500])
         print("== 3/5 topics:", draft_topics(D))
         n, low = autotag(D)
+        for w in fit_warnings(D):
+            print("WARNING:", w)
         made = split_topics(D)
         print(f"== 4/5 auto-tagged {n} questions ({low} low-confidence); split coarse topics into {made} subtopics")
         print("== 5/5 forecast")
