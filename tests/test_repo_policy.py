@@ -15,7 +15,7 @@ ALL_DOCS = AGENT_DOCS + ["README.md", "CONTRIBUTING.md"]
 DOC_HOSTS = {"img.shields.io", "www.python.org", "www.npmjs.com", "github.com", "ktunotes.live",
              "model.ktunotes.live", "topics.ktunotes.live", "pyq.ktunotes.live", "view.ktunotes.live"}
 GITHUB_REPO = "github.com/justhashim/ktu-exam-predictor"
-STDLIB = {"argparse", "ast", "collections", "contextlib", "datetime", "functools", "glob", "html", "io", "itertools",
+STDLIB = {"argparse", "ast", "collections", "concurrent.futures", "contextlib", "datetime", "functools", "glob", "html", "io", "itertools",
           "json", "math", "os", "random", "re", "shutil", "statistics", "string", "subprocess", "sys", "tempfile",
           "time", "unicodedata", "urllib", "urllib.error", "urllib.parse", "urllib.request"}
 LOCAL = {"fetch", "safety", "predict", "extract_questions", "ktu", "score"}

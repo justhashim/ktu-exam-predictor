@@ -21,7 +21,8 @@ Subject folders: $KTU_STUDY_DIR or ~/Documents/Study Materials/<SHORT>/predictor
 Needs: Python 3.8+ (standard library only). Optional: poppler-utils (pdftotext, pdftoppm) or the pypdf package
 for PDF text; without either, PDFs are downloaded but not read (ktu.py status says so).
 """
-import html, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
+import functools, html, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -37,6 +38,7 @@ def _study_root():
 STUDY = _study_root()
 CACHE = os.path.expanduser(os.environ.get("KTU_CACHE_DIR", "~/.cache/ktu-exam-predictor"))   # ktunotes indexes
 CACHE_DAYS = 7
+WORKERS = 8         # parallel downloads + PDF conversions (each is network- or subprocess-bound)
 UA = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) study-helper"}
 
 
@@ -151,6 +153,7 @@ def download_drive(fid, path):
     return False
 
 
+@functools.lru_cache(maxsize=8)     # the syllabus is read several times per run
 def pdf_raw_text(pdf):
     """PDF text in content-stream order (pdftotext -raw), which keeps a table cell's lines together. '' if no tool."""
     if shutil.which("pdftotext"):
@@ -168,6 +171,12 @@ def syllabus_ids(page):
     return list(dict.fromkeys(re.findall(r"drive\.google\.com/(?:file/d/|open\?id=)([A-Za-z0-9_-]{20,})", page)))
 
 
+@functools.lru_cache(maxsize=1)
+def _common_ids():
+    """Drive links on every syllabus/model page (site chrome), fetched once per run."""
+    return frozenset(syllabus_ids(get("https://syllabus.ktunotes.live/", timeout=60)))
+
+
 def cmd_syllabus(code, D):
     """Download the official KTU syllabus PDF of a course into D/syllabus/ and write its module text to
     syllabus/MODULES.md. It works for courses ktunotes has no notes for (e.g. PCEOT501), and its module headings
@@ -181,7 +190,7 @@ def cmd_syllabus(code, D):
     title = re.search(r"<title>(.*?)</title>", page, re.S)
     if not title or code.upper() not in title.group(1).upper():
         return None                                       # the site answers unknown codes with its home page
-    common = set(syllabus_ids(get("https://syllabus.ktunotes.live/", timeout=60)))   # links on every page
+    common = _common_ids()
     ids = [i for i in syllabus_ids(page) if i not in common]
     if not ids:
         return None
@@ -230,7 +239,7 @@ def cmd_model(code, D):
     title = re.search(r"<title>(.*?)</title>", page, re.S)
     if not title or code.upper() not in title.group(1).upper():
         return None
-    common = set(syllabus_ids(get("https://syllabus.ktunotes.live/", timeout=60)))
+    common = _common_ids()
     ids = [i for i in syllabus_ids(page) if i not in common]
     if not ids:
         return None
@@ -301,7 +310,7 @@ def to_text(pdf, imgdir=None, min_total=0):
         base = os.path.join(imgdir, os.path.basename(pdf)[:-4])
         if not shutil.which("pdftoppm"):
             return "scanned (read the PDF pages directly; pdftoppm not installed)"
-        subprocess.run(["pdftoppm", "-r", "90", "-png", pdf, base], check=False)
+        subprocess.run(["pdftoppm", "-r", "90", "-jpeg", pdf, base], check=False)   # jpeg: ~9x faster than png for scans
         return "scanned -> " + imgdir
     return f"text {n} B"
 
@@ -360,18 +369,28 @@ def cmd_notes(code, D, folder=None, prefix=""):
         typed = [(p, it) for p, it in pick if not any(s in x.upper() for x in p for s in skip)]
         pick = [(p, it) for p, it in typed if any("NOTES" in x.upper() for x in p)] or typed
     os.makedirs(os.path.join(D, "notes"), exist_ok=True)
-    outl = []
+    jobs = {}                                       # path -> (folder path, item, name); first of a duplicate name wins
     for p, it in pick:
         name = (prefix + " " if prefix else "") + safety.safe_name(it["name"])
         if prefix and not re.search(r"(?:^|[^A-Za-z])(?:M|MOD|MODULE)[\s_-]*0?[1-6](?!\d)", name, re.I):
             mm = re.search(r"(?i)\b(?:M|MOD|MODULE)[\s_-]*0?([1-6])\b", " ".join(p))   # module only in the folder name
             if mm:
                 name = f"{prefix} M{mm.group(1)} " + name[len(prefix) + 1:]
-        path = safety.safe_join(os.path.join(D, "notes"), name)
-        print("->", "/".join(p), "/", it["name"])
+        jobs.setdefault(safety.safe_join(os.path.join(D, "notes"), name), (p, it, name))
+
+    def get_notes(job):
+        path, (p, it, name) = job
         if not os.path.exists(path) and not download_drive(it["id"], path):
+            return None
+        return to_text(path, os.path.join(D, "notes", "img"))
+    with ThreadPoolExecutor(WORKERS) as ex:
+        done = list(ex.map(get_notes, jobs.items()))
+    outl = []
+    for (path, (p, it, name)), st in zip(jobs.items(), done):
+        print("->", "/".join(p), "/", it["name"])
+        if st is None:
             continue
-        print("  ", to_text(path, os.path.join(D, "notes", "img")))
+        print("  ", st)
         outl += [f"===== {name}"] + outline(path)
     ol = os.path.join(D, "notes", "OUTLINE.txt")
     open(ol, "a" if prefix else "w", encoding="utf-8").write("\n".join(outl) + "\n")
@@ -705,12 +724,13 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=(), s
     print(f"\nPast papers: {len(picks)} selected (newest first)")
     pq = os.path.join(D, "pyq")
     os.makedirs(pq, exist_ok=True)
-    status = []
-    for r in picks:
+    def get_paper(r):
         path = safety.safe_join(pq, r["file"])
         ok = os.path.exists(path) or (download_drive(r["id"], path) if r["id"] else _dl(r["url"], path))
-        st = to_text(path, os.path.join(pq, "img"), min_total=3000) if ok else "DOWNLOAD FAILED"
-        status.append((r, st))
+        return to_text(path, os.path.join(pq, "img"), min_total=3000) if ok else "DOWNLOAD FAILED"
+    with ThreadPoolExecutor(WORKERS) as ex:       # file names are distinct (one per code/year/month)
+        status = list(zip(picks, ex.map(get_paper, picks)))
+    for r, st in status:
         print(f"  {r['label']:22s} {r['type']:13s} {st}")
     try:
         print("\nNotes:")

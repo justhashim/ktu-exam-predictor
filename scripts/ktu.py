@@ -359,15 +359,11 @@ def draft_topics(D, redo=False):
     # 3b) modules still without topics, and a syllabus: one topic per syllabus item. Better than past-question
     #     clusters: it lists what is new to the course (PCEOT501's ARM module was in its syllabus, in no old paper).
     have = {t["module"] for t in topics.values()}
-    syl_used = False
     for m, item, head in syllabus_topics(D):
         if m in mods and m not in have:
             name = item if len(item.split()) >= 3 or not head else f"{head}: {item}"
             add(f"M{m}_{item}", {"name": name, "module": m, "syllabus": "in", "model": False, "notes": [],
                                  "weight_hint": 1.0, "examples": [head] if head else [], "source": "syllabus"})
-            syl_used = True
-    if syl_used and data:      # model-paper flags from the ktunotes list, as for notes topics
-        pass
     # 4) LAST RESORT for modules with no topics at all (no topic list, no notes text): groups of past questions in
     #    that module (module known from the question number). The course's own papers if it has any; otherwise
     #    the predecessors' papers, their modules mapped onto this course's (a guess: see old_module()).
