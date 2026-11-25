@@ -75,3 +75,11 @@ The ranking beat random by about 18 points. The ceiling was the problem: what th
 2. **The module headings alone (from the syllabus or the paper's CO list) would have exposed the ARM module.** Ask for them.
 3. **For 2024-scheme microcontroller-type courses, expect calculations and programs** with an 11.0592 MHz crystal. Teach worked timer, baud and delay numericals and the standard programs, not only descriptions.
 4. **Score a real paper only against a snapshot frozen before opening it** (`score.py`). The `predict` holdout is optimistic once topics are edited after the exam: here it showed 80–95%.
+
+**Later the same day: the official syllabus.** syllabus.ktunotes.live had PCEOT501's syllabus PDF, even though ktunotes had no notes for the course.
+- **Every question on the real paper was in it,** ARM module included. The module headings match the paper's modules.
+- **Results:** one topic per syllabus item, plus the same 7 RAT206 papers, scored on strict hand tags. Studying 40% / 60% of the syllabus covered **67% / 90%** of marks (random 49% / 68%), with a ceiling of 100%. The papers-only forecast got 45% / 57%, with a ceiling of 57%.
+- **Where the gain comes from:** mostly the topic list itself. Random choice from the syllabus beats the papers-only forecast. The ranking is nearly flat with no notes (equal priors), so cover every item.
+- **Caveat:** the parser was written after seeing the paper, so this is not a blind result.
+- **How to apply:** `prepare` fetches the syllabus for every course (`syllabus/`, `MODULES.md`). With no notes, its items become the topics. Check `MODULES.md`, because a module number in the table can land a few lines off (here the 8051 Timer heading went to module 2; the paper also asked timer questions in module 2).
+
