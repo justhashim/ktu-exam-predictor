@@ -10,9 +10,30 @@
 
 Tell it your KTU subject. It tells you which topics to study first.
 
-[What it does](#what-it-does) • [Does it work?](#does-it-work) • [Install](#install) • [Use it](#use-it) • [How it works](#how-it-works) • [Safety](#safety)
-
 </div>
+
+## Index
+
+**🎓 For students:** plain words, no jargon
+- [What it does](#what-it-does)
+- [Does it work?](#does-it-work)
+- [Install](#install)
+- [Use it](#use-it)
+- [Is it safe?](#is-it-safe)
+
+**🔧 For developers:** how it's built and measured
+- [Pipeline](#pipeline)
+- [Sources and how each is used](#sources-and-how-each-is-used)
+- [Ranking model](#ranking-model)
+- [Evaluation](#evaluation)
+- [Command line](#command-line)
+- [Data files](#data-files)
+- [Security design](#security-design)
+- [Tests, CI and contributing](#tests-ci-and-contributing)
+
+---
+
+# 🎓 For students
 
 ## What it does
 
@@ -28,31 +49,27 @@ It takes about a minute, and it's free: plain Python, nothing to install from pi
 
 ## Does it work?
 
-### How we measure it
-
-Say a subject's syllabus is 10 chapters, and you only have time for 4.
+**How we check it.** Say a subject's syllabus is 10 chapters, and you only have time for 4.
 - **With the tool:** you study the 4 chapters it ranks highest.
 - **Without it:** you pick 4 chapters at random.
 
 Then we take the **real exam paper** and count how many marks you could have answered each way. The forecast only gets material from **before** the exam: no peeking at the paper it's tested on.
 
-### Results
-
 | Real exam (Nov 2026) | Study the top 40% of the syllabus | Study the top 60% |
 |---|---|---|
-| **Computer Networks** (PCCST501) | **85%** of marks with the tool, 54% at random | **95%** with the tool, 73% at random |
+| **Computer Networks** | **85%** of marks with the tool, 54% at random | **95%** with the tool, 73% at random |
 | **Microcontrollers & Embedded Systems** (PCEOT501) | **67%** with the tool, 49% at random | **90%** with the tool, 68% at random |
 
 In plain words:
-- **Studying in the tool's order beat picking topics at random** on both papers: by 31 points (Computer Networks) and 18 points (PCEOT501) at 40% of the syllabus.
-- **It works even with almost nothing to go on.** PCEOT501 is from a branch that is new in the 2024 scheme: no notes, no past papers of its own, and an older course that never covered ARM. Because the tool reads the official syllabus, the 20-mark ARM module was still on the list.
+- **Studying in the tool's order beat picking topics at random** on both papers.
+- **It works even with almost nothing to go on.** PCEOT501 is from a brand-new branch: no notes, no past papers of its own. Because the tool reads the official syllabus, a 20-mark module that no old paper had was still on the list.
 
 > [!WARNING]
-> **These numbers come from only two real papers. Treat them as rough.** The questions were matched to topics by hand, and the PCEOT501 syllabus reader was built after seeing that paper. The tool tells you which **topics** matter. It can't tell you the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
+> **That's only two real papers, so treat the numbers as rough.** The tool tells you which **topics** matter, not the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
 
 ## Install
 
-With the [`skills`](https://www.npmjs.com/package/skills) tool. Nothing to download by hand:
+With the [`skills`](https://www.npmjs.com/package/skills) tool:
 
 ```bash
 # Claude Code, for all your projects
@@ -60,31 +77,13 @@ pnpm dlx skills add justhashim/ktu-exam-predictor -g -a claude-code
 
 # opencode, for all your projects
 pnpm dlx skills add justhashim/ktu-exam-predictor -g -a opencode
-
-# just this project (it asks which agent)
-pnpm dlx skills add justhashim/ktu-exam-predictor
 ```
 
-`npx skills add …` and `bunx skills add …` also work. To update or remove it later:
+`npx skills add …` and `bunx skills add …` also work.
 
-```bash
-pnpm dlx skills update ktu-exam-predictor
-pnpm dlx skills remove ktu-exam-predictor
-```
-
-<details>
-<summary>Install with git instead</summary>
-
-```bash
-git clone https://github.com/justhashim/ktu-exam-predictor ~/.claude/skills/ktu-exam-predictor   # Claude Code
-git clone https://github.com/justhashim/ktu-exam-predictor ~/.config/opencode/skills/ktu-exam-predictor   # opencode
-```
-
-</details>
-
-**You need:**
-- **Python 3.8 or newer.** On Windows, type `python` or `py` instead of `python3`.
-- **A PDF reader for the scripts (strongly recommended):** `poppler-utils`, or `pip install pypdf`. Without one, the papers download but can't be read.
+**You also need:**
+- **Python 3.8 or newer.**
+- **A PDF reader for the scripts.** This one is strongly recommended; without it, papers download but can't be read:
 
   ```bash
   sudo apt install poppler-utils     # Debian/Ubuntu
@@ -105,111 +104,160 @@ I have the supply exam for computer networks next month, what will come?
 You get a file called `FORECAST.md` with:
 - **the study order,** module by module
 - **the questions most likely to come back,** with every past wording
-- **a sample paper** put together from the most likely questions (a guess, clearly labelled)
+- **a sample paper** put together from likely questions (a guess, clearly labelled)
 - **warnings,** for example when there are too few papers to trust the ranking
 
-**If ktunotes has no notes or papers for your subject** (common for new branches), the agent asks you to put your own in a folder. Phone photos of question papers are fine. If you don't have any, it carries on with what it can find.
+**No notes or papers online for your subject?** That's common for new branches. The agent asks you to drop your own into a folder; phone photos of question papers are fine. If you don't have any, it carries on with what it can find.
 
-Your files live in `~/Documents/Study Materials/<SUBJECT>/` if that folder exists, otherwise in `~/KTU Exams/`. Set `KTU_STUDY_DIR` to use another place.
+Your files go in `~/Documents/Study Materials/<SUBJECT>/` if that folder exists, otherwise in `~/KTU Exams/`.
 
-<details>
-<summary>Command line, folders and extra options</summary>
+## Is it safe?
 
-```bash
-S=~/.claude/skills/ktu-exam-predictor/scripts     # wherever the skill was installed
+Yes, it was built with that in mind. Papers and notes are written by other people, so the tool treats them as study material only:
+- **It never runs anything** found inside them.
+- **It only downloads** from the few sites it needs.
+- **Anything that looks like a trick aimed at the AI is hidden,** and you're told about it.
 
-python3 $S/ktu.py prepare "DAA" --label "Nov 2026"    # everything, about a minute
-python3 $S/ktu.py status  "DAA"                       # what is worth checking by hand
-python3 $S/ktu.py predict "DAA" --type supplementary  # run again after edits
+---
 
-# a course ktunotes doesn't list: give its name from the question paper
-python3 $S/ktu.py prepare PCEOT501 --name "Microcontrollers and Embedded Systems"
+# 🔧 For developers
 
-# use a similar course's notes when yours has none
-python3 $S/ktu.py prepare PCEOT501 --notes-from PBECT404 --notes-from PBCST504
+The skill is a `SKILL.md` (the agent's playbook) plus five standard-library Python scripts in `scripts/`. The agent runs one command, reads the result, fixes what the status report flags, then teaches.
 
-# leave out an "older version" that is really a different subject (remembered)
-python3 $S/ktu.py prepare PBCST504 --skip-old CST307
-```
-
-Other tools:
-- `fetch.py`: `resolve`, `setup`, `search`, `list-notes`, `notes`, `pyqs`, `outline`
-- `extract_questions.py --check`: check papers after editing them
-- `score.py`: score a real paper against a forecast saved before the exam
-
-What's in a subject folder:
-
-```text
-<study dir>/<SUBJECT>/
-├── notes/           your own notes or syllabus, if ktunotes has none
-├── papers/          your own question papers: one PDF, or one folder of photos, per paper
-└── predictor/
-    ├── FORECAST.md      the study plan
-    ├── syllabus/        official syllabus + MODULES.md
-    ├── model/           official model question paper
-    ├── notes/           downloaded notes
-    ├── pyq/             downloaded past papers
-    ├── topics.json      the topic list (you can edit it)
-    ├── papers.json      every past question, with marks and topics (you can edit it)
-    └── subject.json     course details and exam pattern
-```
-
-To save your exam dates and study style for the agent, copy `references/student.example.md` to `references/student.md`. That file stays on your computer.
-
-</details>
-
-## How it works
+## Pipeline
 
 ```mermaid
 flowchart LR
-    A[Your subject] --> B[Download syllabus, notes,<br/>past papers, model paper]
-    B --> C[Read every question<br/>and its marks]
-    B --> D[Make the topic list<br/>from syllabus + notes]
-    C --> E[Match each question<br/>to a topic]
-    D --> E
-    E --> F[Rank the topics]
-    F --> G[FORECAST.md:<br/>your study plan]
+    A[course code or name] --> R[resolve: catalogue,<br/>predecessor codes]
+    R --> F[fetch: papers, notes,<br/>syllabus, model paper]
+    F --> X[extract questions<br/>+ KTU marks check]
+    F --> T[draft topics: ktunotes list<br/>+ notes gaps + syllabus gaps]
+    X --> G[autotag: TF-IDF cosine<br/>question to topic]
+    T --> G
+    G --> S[split coarse topics<br/>by question clusters]
+    S --> P[predict: history x notes,<br/>module-balanced order]
+    P --> O[FORECAST.md + results.json]
 ```
 
-Each topic gets a score from two things:
-- **How big it is in the notes and syllabus.** This counts for 75% of the score. The new syllabus is what the setter follows.
-- **How often and how recently it came in past papers.** This counts for 25%. Old papers help, but the syllabus changes.
+`ktu.py prepare` runs every stage. Each stage is also its own subcommand, and every intermediate file is plain JSON that you can edit by hand.
 
-Topics in the official model paper get a boost.
+## Sources and how each is used
 
-It also checks its own sources:
-- **Every paper's marks must add up** to the KTU pattern. That's 60 marks for most courses, and 40 for project-based ones like Microcontrollers.
-- **Each "older version" of a course is checked against the new syllabus.** If its questions don't fit, the tool warns you. For example, an old 8085/8086 course is not a real predecessor of a new ARM course.
-- **The forecast starts with a list of what it actually used,** so you can see when something was missing.
+| Source | Where from | Used for |
+|---|---|---|
+| **Syllabus** | syllabus.ktunotes.live (course PDF) | Exam pattern (`8x3 + 4x9`, or `8x2 + 4x6` for project-based courses). Topic gaps: syllabus items with TF-IDF cosine below 0.10 to every topic become topics. Matched items are added to their topic's tagging text. Predecessor fit check. Whole topic list when a course has no notes. |
+| **Notes** | ktunotes Drive folders | Topic sizes (pages), which drive the prior and the study effort. Notes sections the ktunotes list misses become topics. |
+| **Past papers** | pyq.ktunotes.live index (Drive), MBCET index | Question history. Current-course papers weigh 3x for likely questions. |
+| **Model paper** | model.ktunotes.live | Added as a current-course paper. Topics it asks get the model-paper prior boost. |
+| **Topic list** | topics.ktunotes.live | Curated topics per module, with recurrence as a weight hint. |
+| **Student's own files** | `<subject>/notes/`, `<subject>/papers/` | Picked up on every `prepare`. Photos become papers to transcribe. |
 
-<details>
-<summary>More detail on the method</summary>
+**Predecessor fit.** Older-scheme codes are found by name similarity, and a similar name can hide a different subject. Each predecessor is checked two ways:
+- **Syllabus match:** the share of its questions with cosine ≥ 0.12 to some syllabus item. Under 0.5 means a misfit.
+- **Chip names:** for microprocessor-type courses, the share of chip-naming questions (8085, 8051, STM32, Cortex, …) that name chips absent from the syllabus. 0.6 or more, over at least 8 questions, means a misfit.
 
-- **History:** a small logistic-regression model on how often a topic was asked, how recently, whether it was in the last paper, and the gap since.
-- **Notes and syllabus:** a prior that grows with a topic's notes pages, plus a boost for model-paper topics. The two signals are blended 25% history and 75% notes.
-- **Study order:** module-balanced.
-- **Likely questions:** the same question across years forms one family. Its chance of coming back is scaled to how often questions repeated in past papers of the same exam type (regular or supply).
-- **How accuracy is measured:** as above, by the share of the syllabus studied (sized by notes pages), against random topic choice. A question only counts if you studied every topic it needs, and studying is assumed to work. The full record is in `references/lessons.md`.
+A misfit prints a warning, and `--skip-old CODE` drops it for good. On 7 calibration pairs, correct predecessors scored 0.69–0.95 syllabus match. Wrong ones scored 0.10–0.17, or 0.87–0.93 chip mismatch.
 
-</details>
+## Ranking model
 
-## Safety
+For each topic *t*, `P(t is asked) = α · history(t) + (1 − α) · prior(t)`, with α = 0.25.
 
-Past papers and notes are written by other people, and an AI agent reads what this tool makes from them. So the tool treats all of that text as study material, never as instructions:
-- **Downloads** only come from the few sites the tool needs, over https, with a size limit.
-- **Text that tries to give orders to an AI** (called "prompt injection") is hidden, and the agent is told about it.
-- **Hidden characters, links and images** in downloaded text are removed or made harmless.
-- **Downloaded file names** can't write outside the subject folder.
+- **history:** an L2-regularised logistic regression, trained on rolling windows of past papers. Its features are frequency, recency (decay 0.7 per paper), presence in the last paper, presence in the last paper of the same type (regular or supplementary), intensity and gap. It needs at least 3 papers; below that, α falls to 0.
+- **prior:** `min(2.5, sqrt(pages / median pages))`, scaled to the expected number of distinct topics per paper. Topics with no notes pages use a weight hint (ktunotes recurrence, or 1.0 for syllabus items). Model-paper topics get `1 − (1 − p)(1 − 0.3)`.
+- **Study order:** round-robin across modules by P, because each 2024-scheme module carries equal marks.
+- **Likely questions:** questions are clustered into families (TF-IDF cosine, average linkage at 0.55, at most one question per paper in a family). Each family's chance is scaled so that the expected repeats match the observed reuse rate of recent same-type papers.
 
-## Contributing
+## Evaluation
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. The tests check the safety rules too, and they run offline in about a second:
+**Metric:** the share of a real paper's marks that are *attainable* after studying the top *k*% of the syllabus, against random topic choice.
+- **Syllabus share:** sized by notes pages, not topic count, because counting topics flatters coarse lists.
+- **Attainable marks:** Part A, plus the better option of each Part B pair. A question counts only if every topic it is tagged with was studied.
+- **Random baseline:** the mean over 300–500 shuffled orders.
+- **Tagging:** the real paper's questions are tagged by hand, so mistakes in the automatic tags can't flatter the score.
+- **Freezing:** the forecast uses pre-exam material only. `score.py` scores a real paper against a frozen snapshot of the forecast.
+
+Full curves, current version, Nov 2026 papers:
+
+| Syllabus studied | 20% | 30% | 40% | 50% | 60% | 70% | 80% |
+|---|---|---|---|---|---|---|---|
+| **CN (PCCST501):** forecast | 50% | 75% | 85% | 95% | 95% | 100% | 100% |
+| CN: random | 30% | 42% | 54% | 63% | 73% | 82% | 88% |
+| **PCEOT501:** forecast | 35% | 43% | 67% | 73% | 90% | 90% | 95% |
+| PCEOT501: random | 26% | 37% | 49% | 59% | 68% | 78% | 87% |
+
+**Caveats:**
+- **n = 2 papers.**
+- **CN:** questions were tagged to the topic whose notes pages hold the content. The ktunotes topic list was checked for leakage: no Nov 2026 tags, and none of the paper's distinctive questions.
+- **PCEOT501:** no notes, so the topics are syllabus items, with 7 RAT206 papers as history. The syllabus parser was written after this paper was seen, so it isn't a blind result.
+- **The full record** is in `references/lessons.md`.
+
+## Command line
 
 ```bash
-python3 -m unittest discover -s tests -v
+S=~/.claude/skills/ktu-exam-predictor/scripts
+
+python3 $S/ktu.py prepare "DAA" --label "Nov 2026"      # all stages, about a minute
+python3 $S/ktu.py status  "DAA"                         # materials used, weak spots, warnings
+python3 $S/ktu.py predict "DAA" --type supplementary    # re-run after edits
+python3 $S/ktu.py topics|autotag|split "DAA"            # single stages (--redo / --all)
+
+python3 $S/ktu.py prepare PCEOT501 --name "Microcontrollers and Embedded Systems"   # code not in the catalogue
+python3 $S/ktu.py prepare PCEOT501 --notes-from PBECT404                             # borrow a similar course's notes
+python3 $S/ktu.py prepare PBCST504 --skip-old CST307                                 # drop a misfit predecessor
+
+python3 $S/extract_questions.py <subject dir> --check   # validate papers.json against the KTU pattern
+python3 $S/score.py <frozen snapshot dir> <paper.json>  # score a real paper (--tags strict)
 ```
 
-The most useful contribution is a **real exam result**: save the forecast before the exam, then score it after. `SKILL.md` explains how.
+`fetch.py` has its own subcommands: `resolve`, `setup`, `search`, `list-notes`, `notes`, `pyqs`, `outline`.
+
+Environment variables:
+- `KTU_STUDY_DIR`: where subject folders go. The default is `~/Documents/Study Materials` if it exists, else `~/KTU Exams`.
+- `KTU_CACHE_DIR`: index cache, default `~/.cache/ktu-exam-predictor`.
+- `KTU_NO_NETWORK=1`: blocks all downloads.
+
+The code needs Python 3.8+ and the standard library only. Optional: `pdftotext`/`pdftoppm` (poppler), or `pypdf`.
+
+## Data files
+
+```text
+<study dir>/<SUBJECT>/
+├── notes/, papers/      the student's own files (picked up by prepare)
+└── predictor/
+    ├── subject.json     code, predecessors, skip_old, exam pattern, alpha, course_boost
+    ├── topics.json      key -> {name, module, source, notes pages, weight_hint, model, syllabus_items}
+    ├── papers.json      papers[] -> {id, label, type, course, scheme, model, questions[]}
+    │                    question: {q: "A1" | "B11a", marks, topics: [keys], text}
+    ├── results.json     everything in FORECAST.md, machine-readable
+    ├── FORECAST.md      the forecast, with a "Materials used" line
+    ├── syllabus/        PDF, text, MODULES.md
+    ├── model/           model question paper (img/ for scans)
+    ├── notes/           notes PDFs, text, OUTLINE.txt
+    └── pyq/             past papers, text, EXTRACTION.md
+```
+
+Question ids follow the paper. 2024 scheme: `A1`–`A8`, then `B9`–`B16` (two per module). 2019 scheme: `A1`–`A10`, then `B11`–`B20`. Sub-parts are `a`, `b`, `c`.
+
+## Security design
+
+Downloaded text is untrusted, and an LLM agent reads what the skill writes from it. All of it goes through `scripts/safety.py`:
+- **`check_url`:** https only. The hosts must be on an allowlist (ktunotes.live, Google Drive and googleusercontent, the MBCET library). User-info URLs and look-alike hosts are rejected. Every redirect is checked too, and downloads are capped at 60 MB. `fetch.get` is the only network call site.
+- **`clean_text`:** removes zero-width, bidi-override, Unicode tag and control characters. It uses NFC normalisation, so `n²` survives; NFKC is used only for detection.
+- **`looks_like_injection` and `scrub`:** pattern detection for text that addresses an AI agent: overrides of earlier directions, role-play, chat tokens, pipe-to-shell, secret paths. Matching text is withheld before it reaches `papers.json`, `topics.json` or `OUTLINE.txt`. On 1,183 real questions and 31,336 lines of notes it flagged nothing.
+- **`md_safe`:** every outside string written to `FORECAST.md` has its images and links flattened, HTML escaped, schemes broken and pipes neutralised.
+- **`safe_join`:** outside file names can't escape their folder. Symlinks among the student's files are skipped.
+
+## Tests, CI and contributing
+
+- **86 offline tests in `tests/`.** They cover the safety unit tests, end-to-end injection through every input route, core regressions, and a policy suite for pull requests. The policy suite enforces standard library only, one network call site, `subprocess` only for known tools, no `eval` or `shell=`, URL literals on the allowlist, and no hidden characters, HTML comments, shell commands or unknown links in the docs the agent reads.
+- **CI** runs on Python 3.8, 3.12 and 3.14 with a read-only token.
+- **`main` is protected by a ruleset:** required checks, linear history, no force pushes, no bypass.
+
+```bash
+python3 -m unittest discover -s tests -v    # about a second, offline
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The most valuable contribution is a real exam result: freeze the forecast before the exam, then score it with `score.py` afterwards.
 
 > [!NOTE]
 > This project is not connected to KTU or ktunotes.live. It downloads publicly shared files for personal study. Please respect the sources and their terms of use.
