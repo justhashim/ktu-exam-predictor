@@ -19,6 +19,7 @@ Tell it your KTU subject. It tells you which topics to study first.
 - [Does it work?](#does-it-work)
 - [Install](#install)
 - [Use it](#use-it)
+- [Use it in web ChatGPT or Gemini](#use-it-in-web-chatgpt-or-gemini)
 - [Is it safe?](#is-it-safe)
 
 **🔧 For developers:** how it's built and measured
@@ -121,6 +122,60 @@ You get a file called `FORECAST.md` with:
 **No notes or papers online for your subject?** That's common for new branches. The agent asks you to drop your own into a folder; phone photos of question papers are fine. If you don't have any, it carries on with what it can find.
 
 Your files go in `~/Documents/Study Materials/<SUBJECT>/` if that folder exists, otherwise in `~/KTU Exams/`.
+
+## Use it in web ChatGPT or Gemini
+
+ChatGPT and Gemini in the browser are chat windows: they can't reach the terminal on your computer, so they can't run the skill's scripts or save files for you. There are still two ways to use it there.
+
+### 1. Let an agent build the forecast, then study it in web chat
+
+Collecting the papers and ranking the topics needs a terminal. Teaching doesn't.
+
+1. Run the skill once in an agent that has a terminal and supports skills (Claude Code, opencode and others). You get a `FORECAST.md` file.
+2. Upload that file to a new ChatGPT or Gemini conversation (drag it in, or paste its contents).
+3. Ask:
+
+```text
+Read this exam forecast, starting with its warnings, and tell me if the
+ranking is weak. Then teach it to me module by module in the order it gives.
+For each topic: explain it, show every past version of its likely questions
+from the file, and work through the numericals. Wait for me to say "next"
+before moving on. If the warnings say the ranking is weak, cover every
+module evenly instead of trusting the order.
+```
+
+The forecast file itself is yours; it stays on your computer until you choose to upload it.
+
+### 2. Have the chatbot do the whole job (no install, no terminal)
+
+Both chatbots read uploaded PDFs, so you can ask one to build the forecast by hand:
+
+1. **Gather the PDFs:** the syllabus, the model paper and about 10 past papers of the course (plus its older version, if it has one) — from syllabus.ktunotes.live, model.ktunotes.live and pyq.ktunotes.live. Photos of papers work as well as PDFs.
+2. **Upload them** into a fresh conversation. If you hit the upload limit, split them across two chats.
+3. **Paste this prompt** with them:
+
+```text
+You are an exam forecast tool for KTU B.Tech. Use only the uploaded
+syllabus, notes and past papers — never invent a question.
+
+1. List every question from every past paper with its marks, following the
+   exam pattern in the syllabus (2024 scheme: 8 questions × 3 marks plus
+   4 questions × 9 marks; older scheme: 10 × 3 marks plus 14-mark questions).
+2. For every syllabus topic record: how often it was asked, how recently,
+   and how much space the syllabus and notes give it.
+3. Rank the topics round-robin across modules (each module carries the same
+   marks), then give me:
+   - a study order, module by module
+   - the questions most likely to come back, with every past wording
+   - a sample paper from likely questions, clearly labelled a guess
+4. Put warnings at the top for anything you could not read (scans, garbled
+   maths) and for how many papers were usable.
+```
+
+> [!WARNING]
+> **This is not the tested tool.** The numbers in [Does it work?](#does-it-work) were measured with the scripts; a chatbot doing the same job by hand has no such score. Treat its ranking as a rough guide and cover every module — and if you can run the real thing even once, prefer it, especially for maths and scanned papers, which need transcribing rather than guessing.
+
+Uploading sends copies of those files to OpenAI or Google. They are past papers and public syllabus documents, so nothing private is shared.
 
 ## Is it safe?
 
