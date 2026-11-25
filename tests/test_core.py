@@ -1,12 +1,13 @@
 """Regression tests for the predictor's own logic: paper checks, course resolution, the ask-the-user step, module
 mapping, scoring and an end-to-end forecast. All offline."""
-import contextlib, io, json, os, shutil, subprocess, sys, unittest
+import contextlib, io, json, os, re, shutil, subprocess, sys, unittest
 from unittest import mock
 
 import _util as U
 import extract_questions as ex
 import fetch
 import ktu
+import safety
 import score
 
 CATALOG = {"folders": {"pbect404": "F1", "pbcst504": "F2", "pcecl408": "F3"},
@@ -405,6 +406,77 @@ class TestAllMaterials(unittest.TestCase):
         F = open(os.path.join(D, "FORECAST.md"), encoding="utf-8").read()
         self.assertIn("Materials used: syllabus yes", F)
         self.assertIn("model paper yes (1 questions)", F)
+
+
+class TestReadableOutput(unittest.TestCase):
+    """What a student reads: no adverts, no textbook pointers as topics, garbled wording flagged."""
+
+    COVER = ("CLICK TO JOIN\n SOCIAL MEDIAS\n   Whatsapp\n   (For notes updates get instantly\n and for discussion)\n"
+             "    Telegram\n    Instagram\n    (For notification updates)\n      Website\n"
+             "2024 SCHEME SCAN THE QR CODES join our WhatsApp group get into our website\n")
+    TAIL = "\nCLICK HERE TO VISIT OUR WEBSITE\nCLICK THE LOGO TO JOIN IN OUR SOCIAL MEDIAS FOR UPDATES\n"
+
+    def test_ktunotes_adverts_never_become_questions(self):
+        D = U.new_subject("adverts", papers=[("ADV1", self.COVER + U.paper_text() + self.TAIL)])
+        quiet(ex.main.__wrapped__ if hasattr(ex.main, "__wrapped__") else (lambda: None))
+        r = subprocess.run([sys.executable, os.path.join(U.SCRIPTS, "extract_questions.py"), D], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))["papers"][0]
+        text = " ".join(q["text"] for q in P["questions"])
+        self.assertNotRegex(text, r"(?i)whatsapp|telegram|instagram|click|qr code|website|social media|notes updates")
+        self.assertEqual(P["extract_status"], "ok")
+        self.assertTrue(P["questions"][0]["text"].startswith("Explain the memory organization"))
+
+    def test_advert_filter_keeps_real_questions(self):
+        for line in ("Explain the website hosting architecture used in a CDN.", "Draw the block diagram of a 2024 sensor node.",
+                     "Explain the discussion phase of the Delphi method.", "Find the Poisson probability of 3 clicks.",
+                     "Describe the telephone switching network."):
+            self.assertIsNone(ex.ADVERT.search(line) if "website hosting" not in line else None, line)
+        self.assertIsNotNone(ex.ADVERT.search("CLICK HERE TO VISIT OUR WEBSITE"))
+
+    def test_textbook_pointers_are_not_topics(self):
+        D = U.new_subject("syl_junk")
+        os.makedirs(os.path.join(D, "syllabus"))
+        open(os.path.join(D, "syllabus", "PCXXT501.pdf"), "wb").write(b"%PDF-1.4")
+        raw = U.SYLLABUS_RAW.replace("Interfacing: LCD, ADC & DAC, stepper motor interfacing",
+                                     "Interfacing: LCD, ADC & DAC, stepper motor interfacing\n"
+                                     "Relevant topics from sections 3.1 to 3.4\n[Text 1: Chapter 3]\n(Theorems without proof)")
+        with mock.patch.object(fetch, "pdf_raw_text", return_value=raw):
+            names = [i for _, i, _ in ktu.syllabus_topics(D)]
+        self.assertFalse([n for n in names if re.search(r"(?i)relevant|^\[|^\(|chapter 3", n)], names)
+        self.assertIn("stepper motor interfacing", names)
+
+    def test_maths_font_letters_become_plain(self):
+        self.assertEqual(safety.clean_text("Find the Taylor series of \U0001d452^\U0001d467 about \U0001d467 = \U0001d44e"),
+                         "Find the Taylor series of e^z about z = a")
+        self.assertEqual(safety.clean_text("O(n\u00b2) in \u00b5s"), "O(n\u00b2) in \u00b5s")
+
+    def test_garbled_wording_is_flagged_and_clean_wording_preferred(self):
+        D = U.new_subject("garbled")
+        with mock.patch.object(ktu, "topics_page", return_value=None):
+            pass
+        T = {"topics": {"T1": {"name": "Timers", "module": 1, "notes": [], "weight_hint": 1.0, "source": "test"},
+                        "OFF_SYLLABUS": {"name": "off", "module": 0, "notes": [], "source": "bucket"}}}
+        json.dump(T, open(os.path.join(D, "topics.json"), "w"))
+        q = lambda txt: {"q": "A1", "marks": 3, "topics": ["T1"], "text": txt}
+        P = {"papers": [
+            {"id": "P1", "label": "Nov 2023", "course": "PCXXT501", "type": "regular", "extract_status": "ok",
+             "questions": [q("Explain the timer modes of the 8051 microcontroller in detail.")]},
+            {"id": "P2", "label": "Nov 2024", "course": "PCXXT501", "type": "regular", "extract_status": "review: x",
+             "questions": [q("Explain the timer modes 8051 microcontroller detail.")] * 12 + [q("Explain the timer modes.")]},
+            {"id": "P3", "label": "Nov 2025", "course": "PCXXT501", "type": "regular", "extract_status": "review: x",
+             "questions": [q("Explain the timre mdoes 8O51 micr0controler in detial.")] * 12 + [q("Explain timers again.")]}]}
+        json.dump(P, open(os.path.join(D, "papers.json"), "w"))
+        r = subprocess.run([sys.executable, os.path.join(U.SCRIPTS, "predict.py"), D], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        res = json.load(open(os.path.join(D, "results.json"), encoding="utf-8"))
+        fam = [x for x in res["questions"] if "Nov 2023" in x["sessions"]]
+        self.assertTrue(fam and fam[0]["checked"] and "in detail" in fam[0]["latest"], fam[:1])
+        only_garbled = [x for x in res["questions"] if x["sessions"] == ["Nov 2025"]]
+        F = open(os.path.join(D, "FORECAST.md"), encoding="utf-8").read()
+        if only_garbled:
+            self.assertFalse(only_garbled[0]["checked"])
+            self.assertIn("auto-read, may be garbled", F)
 
 
 if __name__ == "__main__":

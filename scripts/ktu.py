@@ -169,6 +169,13 @@ def heading(pg):
     return None
 
 
+# syllabus lines that point at a textbook or a list of hours, not at content
+SYL_JUNK = re.compile(r"(?i)^(?:relevant\s+)?(?:topics?\s+)?(?:from\s+)?(?:the\s+)?(?:sections?|chapters?|ch\.?)\s*[\d.]+|"
+                      r"^relevant\s+(?:topics|sections|portions)|^(?:text|reference)\s*books?\b|^(?:book|text|tb|rb)\s*\d|"
+                      r"^\d+\s*(?:hours?|hrs?)\b|^(?:co|po|pso)\s*\d|^[\[(]\s*(?:text|book|ref|tb|rb)\b|"
+                      r"^\((?:[^()]*\b(?:without|with)\s+proofs?\b[^()]*|theorems?[^()]*)\)?$")
+
+
 def syllabus_topics(D):
     """[(module, item, heading)] from the course syllabus (syllabus/<CODE>.pdf, fetched by setup): one topic per
     item in each module's description, e.g. "8051 Interrupt programming: interrupts, priority, ..." gives
@@ -184,6 +191,9 @@ def syllabus_topics(D):
                 continue
             g = re.sub(r"\((?:Book|Text|Textbook|Ref|Reference|TB|RB)\s*[\w .,;-]*\)", "", g, flags=re.I)  # book refs
             g = re.sub(r"(?i)^(hands-on|lab|case stud(?:y|ies)|demo)\s*:\s*", "", g).strip()
+            g = re.sub(r"(?i)[\[(]\s*(?:text|book|ref|tb|rb)\s*-?\s*\d[^\])]*[\])]?", "", g)     # [Text 1: ch 3]
+            g = re.sub(r"(?i)\brelevant\s+(?:topics|sections|portions)\b[^\[(]*", "", g).strip(" ,;.")
+            g = re.sub(r"(?i)\s*\(\s*theorems?\s+without\s+proofs?\s*\)", "", g)     # a note to teachers, no subject
             h = re.match(r"^([^:]{3,70}):\s*(.*)$", g) or \
                 re.match(r"^([A-Z][^:,;\u2013-]{2,50}?)\s+[\u2013-]\s+(.*)$", g)      # "Greedy Strategy - items"
             head, rest = (h.group(1).strip(), h.group(2)) if h else ("", g)
@@ -197,13 +207,16 @@ def syllabus_topics(D):
             parts = [x.replace("\x00", ",") for x in parts]
             items = []
             for it in (re.sub(r"(?i)\s+(and|or)$", "", x.strip(" .,-\u2013")) for x in parts):
-                if not it or it.lower() in ("etc", "and") or re.fullmatch(r"[\d\W]+", it):
+                if not it or it.lower() in ("etc", "and") or re.fullmatch(r"[\d\W]+", it) or SYL_JUNK.search(it):
                     continue
-                if items and (len(it.split()) <= 1 or it.lower().startswith(("and ", "or "))):
+                words = re.findall(r"[A-Za-z]{3,}", it)
+                if items and (len(words) < 2 or it.lower().startswith(("and ", "or "))):
                     items[-1] += ", " + it                  # "addition, subtraction" belong to the item before
                 else:
                     items.append(it)
-            for it in items or [head]:
+            if head and SYL_JUNK.search(head):
+                head = ""                                    # "[Text 1: sections 3.1-3.4]" is a pointer, not a heading
+            for it in items or ([head] if head else []):
                 out.append((m, it[:90], head))
     return out
 

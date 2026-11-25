@@ -493,6 +493,8 @@ def main():
     fam_out = []
     for f, mem in fam_mem.items():
         mem = sorted(mem, key=lambda q: q["paper"])
+        clean = [q for q in mem if str(papers[q["paper"]].get("extract_status", "ok")).startswith("ok")]
+        shown = (clean or mem)[-1]          # latest wording from a paper that passed the marks check, if any
         best, bt = -1.0, None
         for t in fam_topics[f]:
             i = keys.index(t)
@@ -505,7 +507,7 @@ def main():
         fam_out.append({"family": int(f), "topic": bt, "module": topics[bt]["module"], "p": best,
                         "times": len({q["paper"] for q in mem}),
                         "current_course": any(papers[q["paper"]]["course"] == cfg["code"] for q in mem),
-                        "sessions": [papers[q["paper"]]["label"] for q in mem], "latest": mem[-1]["text"],
+                        "sessions": [papers[q["paper"]]["label"] for q in mem], "latest": shown["text"], "checked": bool(clean),
                         "wordings": [q["text"] for q in mem]})
     same_type = [r for r in behaviour["per_paper"] if r["type"] == target["type"]][-3:] or behaviour["per_paper"][-3:]
     reuse = (sum(r["repeats"] for r in same_type) / sum(r["questions"] for r in same_type)) if same_type else 0.4
@@ -525,9 +527,10 @@ def main():
         if cand:
             x = max(cand, key=lambda x: (x["p"], x["times"]))
             used.add(x["family"])
-            return {"topic": t, "p": adj[t]["p"], "q_p": x["p"], "sessions": x["sessions"], "latest": x["latest"], "new": False}
+            return {"topic": t, "p": adj[t]["p"], "q_p": x["p"], "sessions": x["sessions"], "latest": x["latest"], "new": False,
+                    "checked": x["checked"]}
         return {"topic": t, "p": adj[t]["p"], "q_p": None, "sessions": [],
-                "latest": cfg.get("new_topic_questions", {}).get(t, "Explain: " + topics[t]["name"]), "new": True}
+                "latest": cfg.get("new_topic_questions", {}).get(t, "Explain: " + topics[t]["name"]), "new": True, "checked": True}
     pa = cfg["pattern"]
     a_per = max(1, round(pa["part_a"] / len(modules)))
     paper = {}
@@ -592,6 +595,9 @@ def main():
     report(out)
 
 
+AUTO = " *(auto-read, may be garbled: check the paper)*"     # wording only from a paper that failed the marks check
+
+
 def write_markdown(o, cfg, path):
     L = [f"# {M(cfg['name'])} ({M(cfg['code'])}) forecast: {M(o['target']['label'])}",
          f"Generated {o['generated']} by the ktu-exam-predictor skill from {len(o['papers'])} papers"
@@ -629,15 +635,18 @@ def write_markdown(o, cfg, path):
         L += ["", f"## Questions most likely to be reused (about {o['expected_repeats']:.1f} of the paper's questions expected to repeat)", "",
               "| P | Question (latest wording) | Module | Asked in |", "|---|---|---|---|"]
         for x in o["questions"][:40]:
-            L.append(f"| {x['p']:.2f} | {M(x['latest'])} | M{x['module']} | {M(', '.join(x['sessions']))} |")
+            L.append(f"| {x['p']:.2f} | {M(x['latest'])}{AUTO if not x.get('checked', True) else ''} | M{x['module']} | "
+                     f"{M(', '.join(x['sessions']))} |")
     L += ["", "## Paper assembled by the algorithm", ""]
     for m, v in o["paper"].items():
         L.append(f"**Module {m}**")
         for q in v["A"]:
-            L.append(f"- Part A: {M(q['latest'])}" + (" *(not asked before)*" if q["new"] else f" *({M(', '.join(q['sessions']))})*"))
+            L.append(f"- Part A: {M(q['latest'])}" + (" *(not asked before)*" if q["new"] else f" *({M(', '.join(q['sessions']))})*")
+                     + (AUTO if not q.get("checked", True) else ""))
         for i, b in enumerate(v["B"], 1):
             for q in b:
-                L.append(f"- Part B option {i}: {M(q['latest'])}" + (" *(not asked before)*" if q["new"] else f" *({M(', '.join(q['sessions']))})*"))
+                L.append(f"- Part B option {i}: {M(q['latest'])}" + (" *(not asked before)*" if q["new"] else f" *({M(', '.join(q['sessions']))})*")
+                         + (AUTO if not q.get("checked", True) else ""))
         L.append("")
     open(path, "w", encoding="utf-8").write("\n".join(L) + "\n")
 

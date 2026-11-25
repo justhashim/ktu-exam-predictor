@@ -30,6 +30,7 @@ WITHHELD = "[text withheld: it contained instructions aimed at an AI agent; read
 _INVISIBLE = re.compile("[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180e\u200b-\u200f\u202a-\u202e"
                         "\u2060-\u2064\u2066-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb]"
                         "|[\U000e0000-\U000e007f]|[\U000e0100-\U000e01ef]")
+_MATH_ALNUM = re.compile("[\U0001d400-\U0001d7ff]")   # Mathematical Alphanumeric Symbols block
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0d-\x1f\x7f-\x9f]")      # keeps \t \n \f (page breaks)
 
 _INJECTION = [re.compile(p, re.I) for p in (
@@ -87,6 +88,7 @@ def clean_text(s):
     if not isinstance(s, str):
         return s
     s = unicodedata.normalize("NFC", s)       # NFC, not NFKC: keeps n², µ, ½ in questions intact
+    s = _MATH_ALNUM.sub(lambda m: unicodedata.normalize("NFKC", m.group(0)), s)   # 𝑧 𝑠𝑖𝑛 -> z sin (PDF maths fonts)
     s = _INVISIBLE.sub("", s)
     return _CONTROL.sub("", s)
 
@@ -106,13 +108,14 @@ def scrub(s):
 
 def md_safe(s, limit=None):
     """Text for a Markdown table cell or list item. Images and links become plain text (an image URL in a
-    rendered page can leak data), HTML is escaped, and line breaks and pipes cannot break the table."""
+    rendered page can leak data), no HTML tag can start, and line breaks and pipes cannot break the table.
+    Maths stays readable: "P(X > 0)" and "x < 1" are left alone."""
     s = scrub(s if isinstance(s, str) else str(s))
     s = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", s)            # ![alt](url) -> alt
     s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)             # [text](url) -> text
     s = re.sub(r"\[([^\]]*)\]\[[^\]]*\]", r"\1", s)            # [text][ref] -> text
     s = re.sub(r"(?i)\b(https?|ftp|file|data|javascript):/*", lambda m: m.group(1) + "[:]//", s)
-    s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    s = re.sub(r"<(?=[A-Za-z/!?])", "< ", s)                 # no HTML tag or autolink can start; "x < 1" stays readable
     s = s.replace("|", "/").replace("`", "'")
     s = re.sub(r"\s+", " ", s).strip()
     if limit and len(s) > limit:

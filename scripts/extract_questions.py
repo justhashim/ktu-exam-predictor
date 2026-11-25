@@ -27,6 +27,15 @@ MARK_BARE = re.compile(r"^(?P<body>.*?\S)?\s{4,}(?P<m>\d{1,2})\s*$")        # ma
 SUBLBL = re.compile(r"^\s*(?:[0-9IlLtTi|]{1,3}\s*)?(?P<l>[a-c])\s*(?:\)|[l|1](?=\s))\s*")
 NUMLEAD = re.compile(r"^\s*(?P<n>[0-9IlLtTi|oO](?:\s?[0-9IlLtTi|oO]){0,2})\s*(?:[.)]\s*|\s+)(?=\S)")
 STOP_AT = re.compile(r"(?i)important topics|click here to visit|click the logo")
+# ktunotes cover and back pages (adverts) are not exam text: drop such lines wherever they appear, and cut any
+# advert tail that got merged into the last question of a page
+ADVERT = re.compile(r"(?i)whats\s?app|telegram|instagram|\bqr\s*codes?\b|join\s+(?:our|in\s+our)|click\s+(?:to|here|the)\b|"
+                    r"social\s+medias?|search\s+bot|notes\s+updates|internship\s+offers|for\s+more\s+materials|"
+                    r"our\s+website|get\s+more\s+resources|very\s+fastly|scheme\s+notes|announcement|annoucement|"
+                    r"activity\s+points|[sc]gpa\s+calculator|for\s+discussions?\b|notification\s+updates|^\s*\(?\s*website\b|"
+                    r"enter\s+and\s+get|to\s+search\s+notes|^\s*\(?\s*for\s+notes\b|notes?\s+updates|get\s+in\s+and\s+download|"
+                    r"download\s+all\b|^\s*\d{4}\s+scheme\b")
+ADVERT_TAIL = re.compile(r"(?i)\s*(?:click\s+(?:here|to|the\s+logo)|scan\s+the\s+qr|2024\s+scheme\s+scan|downloaded\s+from).*$")
 NOISE = re.compile(r"(downloaded from|ktunotes|page\s*\w*\s*o[fl]\s*\w+|reg\s*no|name\s*:|^\s*\d{6,}|answer\s+\w+\s+(questions|full)|"
                    r"each\s+c\w+\s+\d+\s*m|^\s*[\w'.]{0,3}\d{4,}\w*\s*$|[a-z]{2}t\d{3}\w*\d{4,}|max\.?\s*marks|duration|"
                    r"course\s*(code|name)|apj abdul|b\.?tech|examination|^\s*marks\s*$|^\s*co\s+marks)", re.I)
@@ -49,10 +58,14 @@ def clean_lines(text):
         if MARKER.match(s):
             out.append(s); continue
         if re.search(r"(?i)an[sv]wer\s+[ao]ll\s+questions", s):     # papers without PART headings
-            out.append("PART A"); continue
+            if not (out and re.fullmatch(r"(?i)\s*PART\s*A\s*", out[-1])):   # not twice: it would glue onto A1
+                out.append("PART A")
+            continue
         if re.search(r"(?i)an[sv]wer\s+any\s+one\s*full", s):
-            out.append("PART B"); continue
-        if NOISE.search(s) or not re.search(r"[A-Za-z0-9]{2}", s):   # headers, footers, OCR specks
+            if not (out and re.fullmatch(r"(?i)\s*PART\s*[B8]\s*", out[-1])):
+                out.append("PART B")
+            continue
+        if NOISE.search(s) or ADVERT.search(s) or not re.search(r"[A-Za-z0-9]{2}", s):   # headers, footers, adverts
             continue
         out.append(s)
     return out
@@ -115,6 +128,8 @@ def collect(lines, part, bare=False):
 
 def tidy(t):
     t = re.sub(r"\s+", " ", safety.clean_text(t)).strip()
+    t = ADVERT_TAIL.sub("", t)                                               # advert merged into the end
+    t = re.sub(r"(?i)^PART\s*[AB8]\b\s*", "", t)                             # a section heading glued on
     t = re.sub(r"^[\s'\",.*`|;:J]*\d{0,2}\s+(?=[A-Za-z(])", "", t)         # OCR specks before the text
     t = SUBLBL.sub("", t, count=1)
     t = NUMLEAD.sub("", t, count=1)
