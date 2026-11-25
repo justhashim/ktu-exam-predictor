@@ -6,10 +6,11 @@
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
 [![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#getting-started)
 [![Agent skill](https://img.shields.io/badge/agent-skill-d97757.svg)](https://www.npmjs.com/package/skills)
+[![Tests](https://github.com/justhashim/ktu-exam-predictor/actions/workflows/tests.yml/badge.svg)](https://github.com/justhashim/ktu-exam-predictor/actions/workflows/tests.yml)
 
 Give it a KTU course code or name. It finds the past papers and the module notes, works out which topics matter, and turns that into a study plan you can get through before the exam.
 
-[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [How it works](#how-it-works) • [Accuracy](#accuracy)
+[Features](#features) • [Getting started](#getting-started) • [Usage](#usage) • [How it works](#how-it-works) • [Accuracy](#accuracy) • [Safety](#safety-and-contributing)
 
 </div>
 
@@ -192,6 +193,22 @@ Expect the same for any new branch: no papers until its first exams, and little 
 
 > [!WARNING]
 > That's two papers, and some settings were tuned while looking at the first one, so treat the numbers as rough. Predicting the exact wording of a question is weak. The value is in knowing which **topics** to cover, and in covering every module. No forecast replaces studying the notes.
+
+## Safety and contributing
+
+Past papers, notes and ktunotes pages are written by other people, and an AI agent reads what the skill makes from them. So the scripts treat all of it as data:
+- **Downloads** are https only, to the ktunotes, Google Drive and MBCET hosts the skill needs, with every redirect checked and a size limit.
+- **Text that addresses an AI agent** (prompt injection) is withheld from `papers.json`, `topics.json`, `OUTLINE.txt` and `FORECAST.md`, and `ktu.py status` reports it.
+- **Hidden characters are removed, and links, images and HTML are neutralised** in the forecast.
+- **File names** from Drive or your own folders can't escape the subject folder.
+
+The test suite checks all of this, plus the rules for pull requests: standard library only, one network call site, no shell, and plain agent-facing docs. It runs offline in about a second:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 > [!NOTE]
 > This project is not affiliated with KTU or ktunotes.live. It downloads publicly shared files for personal study. Please respect the sources and their terms of use.
