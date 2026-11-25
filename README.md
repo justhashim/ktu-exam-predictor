@@ -59,13 +59,15 @@ Then we take the **real exam paper** and count how many marks you could have ans
 |---|---|---|
 | **Computer Networks** | **85%** of marks with the tool, 54% at random | **95%** with the tool, 73% at random |
 | **Microcontrollers & Embedded Systems** (PCEOT501) | **67%** with the tool, 49% at random | **90%** with the tool, 68% at random |
+| **Maths for Electrical & Physical Science 3** (GYMAT301) | **72%** with the tool, 48% at random | **93%** with the tool, 67% at random |
 
 In plain words:
-- **Studying in the tool's order beat picking topics at random** on both papers.
+- **Studying in the tool's order beat picking topics at random** on all three papers.
+- **Past questions do come back.** On the GYMAT301 paper, two of the long questions were near-copies of earlier GYMAT301 questions.
 - **It works even with almost nothing to go on.** PCEOT501 is from a brand-new branch: no notes, no past papers of its own. Because the tool reads the official syllabus, a 20-mark module that no old paper had was still on the list.
 
 > [!WARNING]
-> **That's only two real papers, so treat the numbers as rough.** The tool tells you which **topics** matter, not the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
+> **That's only three real papers, so treat the numbers as rough.** The tool tells you which **topics** matter, not the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
 
 ## Install
 
@@ -184,11 +186,18 @@ Full curves, current version, Nov 2026 papers:
 | CN: random | 30% | 42% | 54% | 63% | 73% | 82% | 88% |
 | **PCEOT501:** forecast | 35% | 43% | 67% | 73% | 90% | 90% | 95% |
 | PCEOT501: random | 26% | 37% | 49% | 59% | 68% | 78% | 87% |
+| **GYMAT301:** forecast | 52% | 57% | 72% | 72% | 93% | 100% | 100% |
+| GYMAT301: fully automatic | 52% | 52% | 62% | 72% | 93% | 100% | 100% |
+| GYMAT301: random | 26% | 38% | 48% | 58% | 67% | 76% | 85% |
 
 **Caveats:**
-- **n = 2 papers.**
+- **n = 3 papers.**
 - **CN:** questions were tagged to the topic whose notes pages hold the content. The ktunotes topic list was checked for leakage: no Nov 2026 tags, and none of the paper's distinctive questions.
 - **PCEOT501:** no notes, so the topics are syllabus items, with 7 RAT206 papers as history. The syllabus parser was written after this paper was seen, so it isn't a blind result.
+- **GYMAT301:** blind. Every forecast was frozen before the paper was opened, and the newest download was the May 2026 paper.
+  - The "forecast" row is the skill run as `SKILL.md` directs: the course's own two past papers (Nov 2025, May 2026) were transcribed from page images, because PDF text garbles maths. The flagged older course, MAT102, was left out.
+  - The "fully automatic" row skipped that step: it dropped both garbled papers and ranked from MAT102 papers and the model paper.
+  - Two Part B questions repeated earlier GYMAT301 questions.
 - **The full record** is in `references/lessons.md`.
 
 ## Command line
