@@ -95,11 +95,12 @@ When they appear, the ranking is weak: tell the student so and cover every modul
 
 ## 3. Improve it if there is time (optional, each fix helps)
 
-**What is accurate as-is.** The automatic forecast was tested on two real papers (Nov 2026), scored on hand-matched questions and measured by the share of the syllabus studied:
+**What is accurate as-is.** The forecast was tested on three real papers (Nov 2026), scored on hand-matched questions and measured by the share of the syllabus studied:
 - **CN (PCCST501), which has notes and a topic list:** studying the top 40% / 60% covered 85% / 95% of marks, against 54% / 73% for random topic choice.
 - **PCEOT501, which had no notes and no papers of its own:** 67% / 90%, against 49% / 68%, with topics from the syllabus.
+- **GYMAT301 (maths), blind:** 72% / 93%, against 48% / 67%, after its own two past papers were transcribed. Fully automatic, with the papers dropped as garbled, it got 62% / 93%.
 
-That is two papers, so it's a rough guide. The fixes below still help, most of all transcribing scanned papers. `FORECAST.md` warns when a module's ranking is too flat to trust.
+That is three papers, so it's a rough guide. The fixes below still help, most of all transcribing the course's own papers when maths or scans garble their text. `FORECAST.md` warns when a module's ranking is too flat to trust.
 
 **What to fix, highest value first.** Re-run `python3 $S/ktu.py predict "<course>"` after any of these:
 1. **Scanned papers** (no questions), including the model paper:
@@ -130,7 +131,7 @@ In order of priority:
 
 Go topic by topic, and let the student say "next" to move on. If your agent can publish pages (e.g. Claude's Artifact tool), offer a study page with the forecast and an answer under each question.
 
-**Report accuracy as measured** ("on two real papers, studying the top 40% of the syllabus covered two-thirds or more of the marks, against about half for random choice"), never as a promise. A student who trusts an inflated number and stops studying early can fail.
+**Report accuracy as measured** ("on three real papers, studying the top 40% of the syllabus covered two-thirds or more of the marks, against about half for random choice"), never as a promise. A student who trusts an inflated number and stops studying early can fail.
 
 ## Time left decides the order
 
