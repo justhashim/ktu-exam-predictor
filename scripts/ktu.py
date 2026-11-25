@@ -244,21 +244,35 @@ def draft_topics(D, redo=False):
                 t[field] = [f"M{t['module']}:{a}-{b}" if a != b else f"M{t['module']}:{a}" for _, a, b in rr]
             if rr:
                 t[field + "_src"] = rr      # [notes file, first page, last page]
-    # 4) LAST RESORT for modules with no topics at all (no topic list, no notes text): groups of the course's own
-    #    past questions in that module (module known from the question number)
+    # 4) LAST RESORT for modules with no topics at all (no topic list, no notes text): groups of past questions in
+    #    that module (module known from the question number). The course's own papers if it has any; otherwise
+    #    the predecessors' papers, their modules mapped onto this course's (a guess: see old_module()).
     have = {t["module"] for t in topics.values()}
     pj = os.path.join(D, "papers.json")
     if any(m not in have for m in mods) and os.path.exists(pj):
+        live = [p for p in json.load(open(pj, encoding="utf-8"))["papers"] if not p.get("duplicate_of") and p.get("questions")]
+        own = [p for p in live if p.get("course") == cfg["code"]]
+        use, mapped = (own, False) if own else (live, True)
+        made = []
         for m in [m for m in mods if m not in have]:
-            qm = [q for p in json.load(open(pj, encoding="utf-8"))["papers"] if p.get("course") == cfg["code"]
-                  and not p.get("duplicate_of") for q in p.get("questions", []) if module_of(q["q"], p.get("scheme")) == m]
+            qm = [(p["id"], q) for p in use for q in p.get("questions", [])
+                  if (old_module(q["q"], p.get("scheme"), len(mods)) if mapped else module_of(q["q"], p.get("scheme"))) == m]
             if len(qm) < 2:
                 continue
-            for g in [g for g in _clusters(tfidf([toks(q["text"]) for q in qm]), 0.2) if len(g) >= 2]:
-                texts = [qm[i]["text"] for i in g]
-                lab = _label(texts, [q["text"] for q in qm])
-                add(f"M{m}_{lab}", {"name": f"Module {m}: {lab}", "module": m, "syllabus": "in", "model": False,
-                                    "notes": [], "weight_hint": 1.0, "examples": texts[:6], "source": "past questions"})
+            groups = _clusters(tfidf([toks(q["text"]) for _, q in qm]), 0.2)
+            for g in groups if mapped else [g for g in groups if len(g) >= 2]:   # predecessor-only: keep one-offs too
+                texts = [qm[i][1]["text"] for i in g]
+                lab = _label(texts, [q["text"] for _, q in qm])
+                made.append((len({qm[i][0] for i in g}), add(f"M{m}_{lab}", {
+                    "name": f"Module {m}: {lab}", "module": m, "syllabus": "in", "model": False, "notes": [],
+                    "weight_hint": 1.0, "examples": texts[:12], "source": "past questions"})))
+        if made:      # with no notes, the prior grows with the number of papers that asked the group
+            med = sorted(n for n, _ in made)[len(made) // 2]
+            for n, k in made:
+                topics[k]["weight_hint"] = round(min(2.5, (n / med) ** 0.5), 3)
+        if mapped and made:
+            cfg["old_module_map"] = cfg.get("old_module_map") or "proportional"
+            json.dump(cfg, open(os.path.join(D, "subject.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     topics[OFF_SYLLABUS] = {"name": "Not in the current syllabus (old-course questions)", "module": 0,
                             "syllabus": "old", "model": False, "notes": [], "source": "bucket"}
     srcs = {}
@@ -286,11 +300,25 @@ def module_of(qid, scheme):
     return (n - (9 if scheme == "2024" else 11)) // 2 + 1
 
 
+def old_module(qid, scheme, n_new=4, table=None):
+    """A predecessor question's module in the CURRENT course: its old module, scaled onto n_new modules
+    (2019's 5 -> 4: 1,2,3,4,5 -> 1,2,3,4,4) unless subject.json gives an explicit old_module_map {"5": 4, ...}.
+    A guess when there is no syllabus: the new course may reorder content."""
+    m = module_of(qid, scheme)
+    if m is None:
+        return None
+    if isinstance(table, dict) and str(m) in table:
+        return int(table[str(m)])
+    n_old = 5 if scheme == "2019" else 4
+    return min(n_new, max(1, math.ceil(m * n_new / n_old)))
+
+
 def autotag(D, retag=False):
     P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
     T = json.load(open(os.path.join(D, "topics.json"), encoding="utf-8"))["topics"]
     cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
     keys = [k for k in T if T[k].get("module")]          # the OFF_SYLLABUS bucket (module 0) is never a match
+    from_papers = any(T[k].get("source") == "past questions" for k in keys)
     pages = {(f, i): pg for f, i, _, pg in notes_pages(D)}
     docs = []
     for k in keys:
@@ -306,7 +334,12 @@ def autotag(D, retag=False):
     tv, qv = vecs[:len(keys)], vecs[len(keys):]
     low = 0
     for (p, q), v in zip(qs, qv):
-        mod = module_of(q["q"], p.get("scheme")) if p.get("course") == cfg["code"] else None
+        if p.get("course") == cfg["code"]:
+            mod = module_of(q["q"], p.get("scheme"))
+        elif cfg.get("old_module_map") and from_papers:   # topics built from predecessor papers: keep their modules
+            mod = old_module(q["q"], p.get("scheme"), cfg.get("modules", 4), cfg["old_module_map"])
+        else:
+            mod = None
         if mod is not None and not any(T[k]["module"] == mod for k in keys):
             mod = None
         cands = sorted(((cos(v, tv[j]), k) for j, k in enumerate(keys) if mod is None or T[k]["module"] == mod), reverse=True)
@@ -503,7 +536,9 @@ def status(D, quiet=False):
     if no_topics:
         todo.append(f"modules {no_topics} have no topics: add them to topics.json")
     if not notes_pdfs:
-        todo.append("no notes were downloaded (check `fetch.py list-notes <code>`, or add your own PDFs to notes/)")
+        todo.append("ASK THE USER: no notes. They can download notes or the syllabus into "
+                    f"{os.path.join(os.path.dirname(D), 'notes')} and run prepare again; if they won't, carry on "
+                    "(predecessor papers; `--notes-from CODE` for a similar course's notes)")
     elif scans:
         todo.append(f"notes for modules {scans} have no text (scans: see notes/img/)")
     if empty:
@@ -534,6 +569,9 @@ def main():
     ap.add_argument("--papers", type=int, default=10)
     ap.add_argument("--old", action="append", default=[], help="force a predecessor course code (repeatable)")
     ap.add_argument("--short", default=None, help="subject folder name, e.g. MC")
+    ap.add_argument("--name", default=None, help="course name, for a code missing from the ktunotes catalogue")
+    ap.add_argument("--notes-from", action="append", default=[], dest="notes_from",
+                    help="also fetch the notes of a similar course (repeatable), for a course with no notes of its own")
     ap.add_argument("--type", default="regular", choices=["regular", "supplementary"])
     ap.add_argument("--label", default=None, help='exam label, e.g. "Nov 2026"')
     ap.add_argument("--redo", action="store_true", help="topics: redraft topics.json")
@@ -542,7 +580,7 @@ def main():
     pargs = ["--type", a.type] + (["--label", a.label] if a.label else [])
     if a.command == "prepare":
         print("== 1/5 fetch papers and notes")
-        D = fetch.cmd_setup(a.subject, a.papers, a.old, a.short)
+        D = fetch.cmd_setup(a.subject, a.papers, a.old, a.short, a.name, a.notes_from)
         if not text_tool():
             print("\nWARNING: no PDF text tool (pdftotext or pypdf). Papers and notes were downloaded but cannot be read,"
                   "\nso there will be no questions. Install poppler-utils (or `pip install pypdf`) and run prepare again.")

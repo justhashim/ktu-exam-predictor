@@ -172,8 +172,39 @@ def check(qs):
     return scheme, probs
 
 
+def header_type(text):
+    """regular / supplementary from the printed header: "(R)", "(R,S)" = regular; "(S,FE)", "(S)",
+    "Supplementary" = supplementary. None if the header can't be read. Needed when the predecessor course is
+    from another semester (an S4 course behind an S5 one), where the month alone misleads."""
+    head = text[text.find("APJ"):][:900] if "APJ" in text else text[:3000]
+    if re.search(r"\(\s*R\s*[,)]", head):
+        return "regular"
+    if re.search(r"(?i)supplementary|\(\s*S\s*[,)]|\bS\s*,\s*FE\b", head):
+        return "supplementary"
+    return None
+
+
+def mark_duplicates(P):
+    """The same session uploaded twice (e.g. a year-only file and a dated one): >= 70% of question texts equal."""
+    norm = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())[:80]
+    out = []
+    live = [p for p in P["papers"] if p.get("questions") and not p.get("duplicate_of")]
+    for i, p in enumerate(live):
+        a = {norm(q["text"]) for q in p["questions"]}
+        for o in live[:i]:
+            b = {norm(q["text"]) for q in o["questions"]}
+            if not o.get("duplicate_of") and a and len(a & b) >= 0.7 * min(len(a), len(b)):
+                keep, drop = (o, p) if (o.get("label", "")[:3].isalpha() or not p.get("label", "")[:3].isalpha()) else (p, o)
+                drop["duplicate_of"], drop["questions"] = keep["id"], []
+                out.append(f"{drop['label']} duplicates {keep['label']}: marked duplicate_of")
+                break
+    return out
+
+
 def check_only(D):
     P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
+    for msg in mark_duplicates(P):
+        print("  " + msg)
     bad = 0
     for p in P["papers"]:
         if p.get("duplicate_of"):
@@ -211,6 +242,10 @@ def main():
         src = p.get("source")
         txt = os.path.join(D, src[:-4] + ".txt") if src else None
         text = open(txt, errors="replace", encoding="utf-8").read() if txt and os.path.exists(txt) else ""
+        ht = header_type(text) if text else None
+        if ht and ht != p.get("type"):
+            report.append(f"- {p['label']}: exam type set to {ht} from the printed header (was {p.get('type')})")
+            p["type"] = ht
         if len(text) < 3000:
             p.update({"questions": [], "auto": True, "extract_status": "review: scanned or no text - transcribe from pyq/img"})
             report.append(f"- **{p['label']}**: SCANNED / little text -> transcribe from `pyq/img/` images")

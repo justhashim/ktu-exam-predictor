@@ -2,10 +2,12 @@
 """
 Fetch study sources for a KTU subject from ktunotes.live (public Google Drive files).
 
-  python3 fetch.py setup "DAA" [--papers 10] [--old CST306] [--short DAA]
+  python3 fetch.py setup "DAA" [--papers 10] [--old CST306] [--short DAA] [--name "..."] [--notes-from CODE]
         ONE STEP for any course code or name: resolve the course and its older-scheme predecessors, create
         Study Materials/<SHORT>/predictor/, download the notes and the N most recent distinct past papers,
         and write subject.json, a papers.json skeleton and STATUS.md. Then tag topics and run predict.py.
+        A code missing from the ktunotes catalogue (e.g. PCEOT501) needs --name "<course name>" from the paper.
+        A course with no notes: --notes-from CODE fetches a similar course's notes (setup lists candidates).
   python3 fetch.py resolve "machine learning"           show how a code/name resolves (course + predecessors)
   python3 fetch.py list-notes PCCST502                  show the ktunotes notes folders for a course
   python3 fetch.py notes PCCST502 SUBJECT_DIR [--folder "M1-M4 NOTES"]   download notes PDFs + OUTLINE.txt
@@ -181,7 +183,23 @@ def outline(pdf, width=110):
     return lines
 
 
-def cmd_notes(code, D, folder=None):
+def siblings(code, name, limit=4):
+    """Same-scheme THEORY courses of other branches with a similar name and notes on ktunotes. When a course has
+    no notes of its own, their notes are the best stand-in for its syllabus (PCEOT501: PBECT404 covered its 8051
+    modules, PBCST504 its ARM module, which no predecessor paper had)."""
+    v = viewer()
+    out = []
+    for c in v["catalog"]:
+        cd = c["code"]
+        if cd == code or is_old_code(cd) or re.match(r"[A-Z]{4}L", cd) or cd.lower() not in v["folders"]:
+            continue
+        s = name_sim(name, c["name"])
+        if s >= 0.3:
+            out.append((s, cd, c["name"], c["branch"]))
+    return [f"{cd} {nm} ({br})" for s, cd, nm, br in sorted(out, reverse=True)[:limit]]
+
+
+def cmd_notes(code, D, folder=None, prefix=""):
     items = tree(notes_root(code))
     show(items)
     pick = []
@@ -202,14 +220,19 @@ def cmd_notes(code, D, folder=None):
     os.makedirs(os.path.join(D, "notes"), exist_ok=True)
     outl = []
     for p, it in pick:
-        name = re.sub(r"[^A-Za-z0-9._ -]+", "_", it["name"])
+        name = (prefix + " " if prefix else "") + re.sub(r"[^A-Za-z0-9._ -]+", "_", it["name"])
+        if prefix and not re.search(r"(?:^|[^A-Za-z])(?:M|MOD|MODULE)[\s_-]*0?[1-6](?!\d)", name, re.I):
+            mm = re.search(r"(?i)\b(?:M|MOD|MODULE)[\s_-]*0?([1-6])\b", " ".join(p))   # module only in the folder name
+            if mm:
+                name = f"{prefix} M{mm.group(1)} " + name[len(prefix) + 1:]
         path = os.path.join(D, "notes", name)
         print("->", "/".join(p), "/", it["name"])
         if not os.path.exists(path) and not download_drive(it["id"], path):
             continue
         print("  ", to_text(path, os.path.join(D, "notes", "img")))
         outl += [f"===== {name}"] + outline(path)
-    open(os.path.join(D, "notes", "OUTLINE.txt"), "w", encoding="utf-8").write("\n".join(outl) + "\n")
+    ol = os.path.join(D, "notes", "OUTLINE.txt")
+    open(ol, "a" if prefix else "w", encoding="utf-8").write("\n".join(outl) + "\n")
     print("outline written to", os.path.join(D, "notes", "OUTLINE.txt"))
 
 
@@ -298,12 +321,42 @@ def is_old_code(code):
     return len(code) <= 6          # 2019/2015 scheme codes (CST306, AMT305, CS305) vs 2024 ones (PCCST502)
 
 
-def resolve(query, extra_old=()):
+CODE_RE = re.compile(r"[A-Z]{2,5}\d{3}")
+
+
+def uncatalogued(code, name=None):
+    """A course code missing from the ktunotes catalogue (e.g. PCEOT501, a branch ktunotes does not cover).
+    Its name comes from --name, an existing subject folder, or past-paper file names; None if unknown."""
+    if not name:
+        for d in sorted(os.listdir(STUDY)) if os.path.isdir(STUDY) else []:
+            sj = os.path.join(STUDY, d, "predictor", "subject.json")
+            if os.path.exists(sj):
+                s = json.load(open(sj, encoding="utf-8"))
+                if s.get("code") == code:
+                    name = s.get("name")
+    if not name:
+        for f in pyq_index()["mapping"]:
+            m = re.match(rf"KTUNOTES_LIVE_{code}_(.+?)_(?:[A-Z]{{3,4}}_)?\d{{4}}_", f)
+            if m:
+                name = m.group(1).replace("_", " ").replace(" AMP ", " & ").title()
+                break
+    if not name:
+        return None
+    m = re.match(r"[A-Z]+(\d)", code)
+    return {"code": code, "name": name, "sem": f"S{m.group(1)}" if m and not is_old_code(code) else "", "branch": ""}
+
+
+def resolve(query, extra_old=(), name=None):
     v = viewer()
     cat = v["catalog"]
     q = query.strip()
     alternatives = []
     hit = next((c for c in cat if c["code"].lower() == q.lower()), None)
+    if not hit and CODE_RE.fullmatch(q.upper()):
+        hit = uncatalogued(q.upper(), name)
+        if not hit:
+            sys.exit(f"'{q}' is not in the ktunotes catalogue and has no past papers there. Rerun with the course "
+                     f"name from the question paper: --name \"<course name>\" (and --old CODE for a predecessor).")
     if not hit:   # by short name / keyword, then by name similarity (prefer 2024-scheme CSE courses)
         kw = [code for code, ks in v["keywords"].items() if q.lower() in [k.lower() for k in ks]]
         if kw:
@@ -414,8 +467,70 @@ def paper_list(codes, sem):
     return sorted(out, key=lambda r: (tier(r["code"]), r["month"] == 0, -r["year"], -r["month"]))
 
 
-def cmd_setup(query, n=10, extra_old=(), short=None):
-    info = resolve(query, extra_old)
+IMG_EXT = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def ingest_user_files(D, code):
+    """The student's own files, put in the subject folder next to predictor/:
+         <SUBJECT>/notes/   notes or syllabus (PDF, or photos)   -> predictor/notes/ ("MY " prefix)
+         <SUBJECT>/papers/  past or real question papers: one PDF per paper, or one sub-folder of photos per
+                            paper (loose photos count as one paper)  -> predictor/pyq/ + a papers.json entry
+       Both folders are created empty so the student knows where to put things. Returns (notes added, papers)."""
+    U = os.path.dirname(D)
+    un, up = os.path.join(U, "notes"), os.path.join(U, "papers")
+    for d in (un, up):
+        os.makedirs(d, exist_ok=True)
+    added_notes, papers = 0, []
+    for f in sorted(os.listdir(un)):
+        src, low = os.path.join(un, f), f.lower()
+        if low.endswith(".pdf"):
+            dst = os.path.join(D, "notes", "MY " + re.sub(r"[^A-Za-z0-9._ -]+", "_", f))
+            if not os.path.exists(dst):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy(src, dst)
+                print("   own notes:", f, "->", to_text(dst, os.path.join(D, "notes", "img")))
+            added_notes += 1
+        elif low.endswith(IMG_EXT):
+            os.makedirs(os.path.join(D, "notes", "img"), exist_ok=True)
+            shutil.copy(src, os.path.join(D, "notes", "img", "MY " + f))
+            added_notes += 1
+    groups = {}
+    for f in sorted(os.listdir(up)):
+        src = os.path.join(up, f)
+        if os.path.isdir(src):
+            imgs = [os.path.join(src, x) for x in sorted(os.listdir(src)) if x.lower().endswith(IMG_EXT)]
+            if imgs:
+                groups[f] = imgs
+        elif f.lower().endswith(".pdf"):
+            groups[f[:-4]] = [src]
+        elif f.lower().endswith(IMG_EXT):
+            groups.setdefault("photos", []).append(src)
+    for stem, files in groups.items():
+        safe = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_")[:60] or "paper"
+        pid = "MY_" + safe.upper()
+        if files[0].lower().endswith(".pdf"):
+            dst = os.path.join(D, "pyq", "MY_" + safe + ".pdf")
+            if not os.path.exists(dst):
+                shutil.copy(files[0], dst)
+            st = to_text(dst, os.path.join(D, "pyq", "img"), min_total=3000)
+            src_rel = "pyq/" + os.path.basename(dst)
+        else:
+            os.makedirs(os.path.join(D, "pyq", "img"), exist_ok=True)
+            for i, f in enumerate(files, 1):
+                shutil.copy(f, os.path.join(D, "pyq", "img", f"MY_{safe}-{i}{os.path.splitext(f)[1].lower()}"))
+            st, src_rel = f"photos -> pyq/img/MY_{safe}-*", None
+        cm = re.search(r"[A-Z]{2,5}\d{3}", os.path.basename(files[0]).upper())
+        mon = next((MON_NAME[MONTHS[t]] for t in re.findall(r"[A-Z]{3,4}", stem.upper()) if t in MONTHS), "")
+        yr = re.search(r"20\d\d", stem)
+        papers.append({"id": pid, "label": (f"{mon} {yr.group(0)}".strip() if yr else stem[:24]) + " (own copy)",
+                       "type": "regular", "course": cm.group(0) if cm else code, "source": src_rel, "own": True,
+                       "questions": [], "_status": st})
+        print(f"   own paper: {stem} -> {st}")
+    return added_notes, papers
+
+
+def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
+    info = resolve(query, extra_old, name)
     sm = STUDY
     os.makedirs(sm, exist_ok=True)
     folder = None
@@ -448,10 +563,39 @@ def cmd_setup(query, n=10, extra_old=(), short=None):
         cmd_notes(info["code"], D)
         notes_ok = True
     except SystemExit as e:
-        print("  ", e)
+        print("  ", str(e)[:160])
         notes_ok = False
+    sib = []
+    for sc in notes_from:          # notes of sibling courses stand in for a course with none of its own
+        print(f"\nNotes of sibling course {sc.upper()} (stand-in syllabus):")
+        try:
+            cmd_notes(sc.upper(), D, prefix=sc.upper())
+            sib.append(sc.upper())
+        except SystemExit as e:
+            print("  ", str(e)[:160])
+    print("\nOwn files (the student's notes/ and papers/ folders):")
+    own_notes, own_papers = ingest_user_files(D, info["code"])
+    if not own_notes and not own_papers:
+        print("   none")
+    n_papers = sum(1 for _, st in status if "FAILED" not in st) + len(own_papers)
+    U = os.path.dirname(D)
+    missing = ([] if notes_ok or sib or own_notes else ["notes"]) + ([] if n_papers else ["past papers"])
+    if missing:
+        cands = siblings(info["code"], info["name"]) if "notes" in missing else []
+        print(f"\n== ASK THE USER: ktunotes has no {' and no '.join(missing)} for {info['code']}.\n"
+              f"   Ask the student to download them (college portal, classmates, the department, the KTU syllabus PDF)\n"
+              f"   and put them in these folders, then run prepare again:\n"
+              + ("   - notes or syllabus (PDF or photos):  " + os.path.join(U, "notes") + "\n" if "notes" in missing else "")
+              + ("   - past question papers (one PDF, or one folder of photos, per paper):  " + os.path.join(U, "papers") + "\n"
+                 if "past papers" in missing else "")
+              + "   If they can't or would rather not, carry on with the usual process: "
+              + ("predecessor papers" + (f" ({', '.join(info['old_codes'])})" if info["old_codes"] else "")
+                 + (", and notes of a similar course with --notes-from CODE: " + "; ".join(cands) if cands else "")
+                 + ". Without notes, content new to this syllabus cannot appear in the forecast."))
     sj = os.path.join(D, "subject.json")
     cfg = json.load(open(sj, encoding="utf-8")) if os.path.exists(sj) else {}
+    if sib:
+        cfg["notes_from"] = sorted(set(cfg.get("notes_from", [])) | set(sib))
     cfg.update({"code": info["code"], "name": info["name"], "short": folder, "old_codes": info["old_codes"],
                 "semester": info["sem"]})
     if is_old_code(info["code"]):     # a 2019-scheme (or older) course: 10 x 3 + 5 modules x 14
@@ -474,7 +618,17 @@ def cmd_setup(query, n=10, extra_old=(), short=None):
         if r["pid"] not in have and "FAILED" not in st:
             P["papers"].append({"id": r["pid"], "label": r["label"], "type": r["type"], "course": r["code"],
                                 "source": "pyq/" + r["file"], "questions": []})
-    P["papers"].sort(key=lambda p: (int(re.search(r"\d\d", p["id"]).group(0)), MON_NAME.index(p["id"][:3].title()) if p["id"][:3].title() in MON_NAME else 0))
+    for p in own_papers:
+        st = p.pop("_status")
+        if p["id"] not in have:
+            P["papers"].append(p)
+        status.append(({"label": p["label"], "type": p["type"]}, st))
+
+    def when(p):      # oldest first; the student's own copies use the year and month in their label
+        y = re.search(r"20(\d\d)", p.get("label", "")) or re.search(r"(\d\d)", p["id"])
+        mon = next((MON_NAME.index(t) for t in re.findall(r"[A-Z][a-z]{2}", p.get("label", "")) if t in MON_NAME), 0)
+        return (int(y.group(1)) if y else 99, mon or (MON_NAME.index(p["id"][:3].title()) if p["id"][:3].title() in MON_NAME else 0))
+    P["papers"].sort(key=when)
     json.dump(P, open(pj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     lines = [f"# {info['name']} ({info['code']}) predictor: status", "",
              f"Set up by `fetch.py setup` from the query '{query}'.", "",
@@ -509,9 +663,13 @@ if __name__ == "__main__":
         return a[a.index(name) + 1] if name in a else default
     if a[0] == "setup":
         olds = [a[i + 1] for i, x in enumerate(a) if x == "--old"]
-        cmd_setup(a[1], int(opt("--papers", 10)), olds, opt("--short"))
+        sibs = [a[i + 1] for i, x in enumerate(a) if x == "--notes-from"]
+        cmd_setup(a[1], int(opt("--papers", 10)), olds, opt("--short"), opt("--name"), sibs)
     elif a[0] == "resolve":
-        print(json.dumps(resolve(" ".join(x for x in a[1:] if not x.startswith("--"))), indent=1))
+        olds = [a[i + 1] for i, x in enumerate(a) if x == "--old"]
+        skip = {i + 1 for i, x in enumerate(a) if x in ("--old", "--name")}
+        q = " ".join(x for i, x in enumerate(a[1:], 1) if not x.startswith("--") and i not in skip)
+        print(json.dumps(resolve(q, olds, opt("--name")), indent=1))
     elif a[0] == "list-notes":
         show(tree(notes_root(a[1])))
     elif a[0] == "notes":

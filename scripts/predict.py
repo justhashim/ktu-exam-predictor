@@ -514,6 +514,11 @@ def main():
             warnings.append(f"Module {m}: topic probabilities are nearly equal, so the order within it is weak.")
     if not any(m["module"] for m in topics.values()):
         warnings.append("No topics.")
+    elif all(m.get("source") in ("past questions", "bucket") for m in topics.values()):
+        warnings.append("No notes or syllabus: every topic comes from older papers, so content new to this course "
+                        "cannot appear here, and modules are mapped from the old course by guess. On PCEOT501 (Nov 2026) "
+                        "this left 20 of 60 marks (a whole ARM module) outside the list. Get the module headings or a "
+                        "similar course's notes (ktu.py prepare ... --notes-from CODE) before trusting the order.")
     if not papers:
         warnings.append("No past papers with questions: the order reflects only the topic list's own priorities.")
     elif len(papers) < 3:
