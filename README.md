@@ -26,7 +26,13 @@ An agent skill for students of APJ Abdul Kalam Technological University (KTU). I
 - **Plug and play.** Plain Python 3 standard library, with no `pip install`, no API keys and no setup.
 - **One command.** `ktu.py prepare "DAA"` runs the whole pipeline: fetch, extract, topics, tags, forecast.
 - **Any course, by code or name.** `PCCST502`, `DAA` and `design and analysis of algorithms` all work. Older-scheme versions are found automatically (PCCST502 → CST306).
-- **Topics that cover the current syllabus.** The ktunotes topic list is extended with notes sections it misses. When a course has no notes, the official syllabus is downloaded and each item becomes a topic. Coarse topics are split into subtopics built from groups of similar past questions, and old-course questions that fit nothing go to an "off-syllabus" bucket instead of distorting the ranking.
+- **Every source, used together.** The syllabus, the notes, past papers and the official model paper:
+  - **Syllabus:** sets the exam pattern (40-mark project-based courses included), adds the topics the ktunotes list misses, and decides whether an older course is really the same subject.
+  - **Notes:** set how big each topic is.
+  - **Past papers:** give the history.
+  - **Model paper:** shows the setter's style.
+  - Each forecast starts by listing what it used.
+- **Topics that cover the current syllabus.** The ktunotes topic list is extended with notes sections and syllabus items it misses. When a course has no notes, each syllabus item becomes a topic. Coarse topics are split into subtopics built from groups of similar past questions, and old-course questions that fit nothing go to an "off-syllabus" bucket instead of distorting the ranking.
 - **Honest status.** Papers that fail the KTU marks check, scanned papers and low-confidence tags are listed, so you or your agent can see what's worth checking by hand.
 - **Module-balanced study order.** Each module carries equal marks, so the plan never leaves a whole module uncovered.
 - **Likely questions, with every past wording.** Questions are ranked by reuse, with current-scheme papers weighted higher, and there is an assembled "likely paper".
@@ -108,6 +114,9 @@ python3 $S/ktu.py predict "DAA" --type supplementary  # re-run after edits
 
 # a course ktunotes doesn't list (name from the question paper), using a similar course's notes as its syllabus
 python3 $S/ktu.py prepare PCEOT501 --name "Microcontrollers and Embedded Systems" --notes-from PBECT404 --notes-from PBCST504
+
+# leave out an older course that turned out to be a different subject (remembered)
+python3 $S/ktu.py prepare PBCST504 --skip-old CST307
 ```
 
 Lower-level tools, if you want them:
@@ -125,6 +134,7 @@ The output is `FORECAST.md` in the subject folder:
 └── predictor/
     ├── FORECAST.md      study order, likely questions, likely paper
     ├── syllabus/        official syllabus PDF + MODULES.md
+    ├── model/           official model question paper
     ├── subject.json     course, predecessors, exam pattern
     ├── topics.json      topics with notes pages (auto-drafted, editable)
     ├── papers.json      past questions with marks and topic tags (auto-drafted, editable)
