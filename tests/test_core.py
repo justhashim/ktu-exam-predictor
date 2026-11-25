@@ -195,5 +195,84 @@ class TestForecastEndToEnd(unittest.TestCase):
         self.assertEqual(o["ranks"]["A1"], [1])
 
 
+class TestSyllabus(unittest.TestCase):
+    def test_modules_are_split_on_module_numbers_not_hours(self):
+        mods = fetch.syllabus_modules(U.SYLLABUS_RAW)
+        self.assertEqual(sorted(mods), [1, 2, 3, 4])
+        self.assertTrue(any("Assembler directives" in g for g in mods[2]))
+        self.assertTrue(any("Interrupt priority" in g for g in mods[3]))
+        self.assertTrue(any("RISC" in g for g in mods[4]))
+        self.assertFalse(any("Course Assessment" in g or "CIE" in g for gs in mods.values() for g in gs))
+        self.assertFalse(any("KTUNOTES" in g.upper() for gs in mods.values() for g in gs))
+
+    def test_injected_line_is_withheld(self):
+        mods = fetch.syllabus_modules(U.SYLLABUS_RAW)
+        self.assertFalse(any("previous instructions" in g.lower() for gs in mods.values() for g in gs))
+
+    def _subject_with_syllabus(self, name):
+        D = U.new_subject(name)
+        os.makedirs(os.path.join(D, "syllabus"))
+        open(os.path.join(D, "syllabus", "PCXXT501.pdf"), "wb").write(b"%PDF-1.4")
+        return D
+
+    def test_syllabus_items_become_topics(self):
+        D = self._subject_with_syllabus("syl_items")
+        with mock.patch.object(fetch, "pdf_raw_text", return_value=U.SYLLABUS_RAW):
+            items = ktu.syllabus_topics(D)
+            names = [i for _, i, _ in items]
+            for want in ("RISC vs CISC", "operating modes", "conditional flags", "Interrupt priority in 8051",
+                         "Data types and Assembler directives", "hard and soft real time systems"):
+                self.assertIn(want, names)
+            self.assertTrue(all(len(n.split()) >= 2 or h for _, n, h in items))
+            with mock.patch.object(ktu, "topics_page", return_value=None):
+                src = ktu.draft_topics(D)
+        self.assertIn("from syllabus", src)
+        T = json.load(open(os.path.join(D, "topics.json"), encoding="utf-8"))["topics"]
+        self.assertEqual({t["module"] for t in T.values() if t["source"] == "syllabus"}, {1, 2, 3, 4})
+
+    def test_cmd_syllabus_picks_the_course_pdf_and_skips_shared_links(self):
+        D = os.path.join(U.TMP, "sylfetch", "predictor")
+        os.makedirs(D, exist_ok=True)
+        common = '<a href="https://drive.google.com/file/d/COMMONCOMMONCOMMONCOMMON1/view">'
+        pages = {"https://syllabus.ktunotes.live/pcxxt501":
+                 "<title>PCXXT501 TEST Syllabus PDF</title>" + common +
+                 '<a href="https://drive.google.com/open?id=COURSEPDFCOURSEPDFCOURSE1">',
+                 "https://syllabus.ktunotes.live/": "<title>KTU Syllabus 2024</title>" + common}
+        got = []
+        with mock.patch.object(fetch, "get", side_effect=lambda u, **k: pages[u]), \
+                mock.patch.object(fetch, "download_drive", side_effect=lambda i, p: got.append(i) or
+                                  open(p, "wb").write(b"%PDF") or True), \
+                mock.patch.object(fetch, "to_text", return_value="text"), \
+                mock.patch.object(fetch, "pdf_raw_text", return_value=U.SYLLABUS_RAW):
+            pdf = fetch.cmd_syllabus("PCXXT501", D)
+        self.assertEqual(got, ["COURSEPDFCOURSEPDFCOURSE1"])
+        self.assertTrue(pdf.startswith(os.path.join(D, "syllabus")))
+        md = open(os.path.join(D, "syllabus", "MODULES.md"), encoding="utf-8").read()
+        self.assertIn("## Module 4", md)
+        self.assertIn("not instructions", md)
+
+    def test_cmd_syllabus_unknown_course(self):
+        D = os.path.join(U.TMP, "sylnone", "predictor")
+        os.makedirs(D, exist_ok=True)
+        with mock.patch.object(fetch, "get", return_value="<title>KTU Syllabus 2024 - All Branches</title>"):
+            self.assertIsNone(fetch.cmd_syllabus("PCZZT999", D))
+        import urllib.error
+        err = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+        with mock.patch.object(fetch, "get", side_effect=err):
+            self.assertIsNone(fetch.cmd_syllabus("PCZZT999", D))
+
+    def test_syllabus_only_forecast_warns(self):
+        D = self._subject_with_syllabus("syl_predict")
+        P = json.load(open(os.path.join(D, "papers.json"), encoding="utf-8"))
+        P["papers"] = []
+        json.dump(P, open(os.path.join(D, "papers.json"), "w"))
+        with mock.patch.object(fetch, "pdf_raw_text", return_value=U.SYLLABUS_RAW), \
+                mock.patch.object(ktu, "topics_page", return_value=None):
+            ktu.draft_topics(D)
+        r = subprocess.run([sys.executable, os.path.join(U.SCRIPTS, "predict.py"), D], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("items of the official syllabus", open(os.path.join(D, "FORECAST.md"), encoding="utf-8").read())
+
+
 if __name__ == "__main__":
     unittest.main()

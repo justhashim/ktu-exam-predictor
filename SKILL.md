@@ -29,11 +29,12 @@ python3 $S/ktu.py prepare "<code or name>" --label "<Mon YYYY>"     # add --type
 
 It does the following, printing what it did at each step:
 1. Finds the course and its older-scheme versions (e.g. PCCST502 → CST306).
-2. Downloads the 10 most recent distinct papers and the ktunotes notes.
+2. Downloads the 10 most recent distinct papers, the ktunotes notes, and the official syllabus. The syllabus goes in `syllabus/`, with its modules in `syllabus/MODULES.md`.
 3. Drafts every question with its marks.
 4. Drafts topics:
    - the ktunotes important-topics list
    - plus notes sections that list misses
+   - for modules with neither, one topic per syllabus item
    - plus an "off-syllabus" bucket for old-course questions that match nothing
 5. Auto-tags questions to topics, and splits topics that are too coarse into subtopics built from groups of similar past questions.
 6. Writes `FORECAST.md` in the subject folder (`<study dir>/<SHORT>/predictor/`).
@@ -41,7 +42,7 @@ It does the following, printing what it did at each step:
 
 **A code missing from the ktunotes catalogue** (often a branch new in the 2024 scheme, e.g. PCEOT501 of Electrical and Computer Engineering, with no papers yet) stops with a message. Read the course name from the question paper or ask, then rerun with `--name "<course name>"`.
 
-**When `prepare` prints `== ASK THE USER`** (ktunotes has no notes, or no past papers at all), stop and ask before going on (with AskUserQuestion if you have it):
+**When `prepare` prints `== ASK THE USER`** (ktunotes has no notes, or no past papers at all), stop and ask before going on (with AskUserQuestion if you have it). If the syllabus was found, the topics already cover the course, but notes still improve the ranking.
 - Ask them to download the notes or syllabus, and any past papers, from the college portal, classmates or the department.
 - They go in the folders it printed: `<subject>/notes/` and `<subject>/papers/` (one PDF, or one folder of photos, per paper).
 - Then rerun `prepare`. It picks these files up, and photos become papers to transcribe.
@@ -106,6 +107,7 @@ So the automatic version is useful but not as good as a checked one. `FORECAST.m
    - Set `"model": true` for topics in the official model paper (`https://model.ktunotes.live/<code>`).
    - Questions tagged `OFF_SYLLABUS` were judged outside the current syllabus. Move any that belong to a real topic.
 4. **Low-confidence tags:** fix `topics` on questions with a low `tag_score`.
+5. **Syllabus topics** (no notes): check `syllabus/MODULES.md` against the PDF. A module number in the table can land a few lines off, which puts a heading in the wrong module. Fix `module` in `topics.json`.
 
 With several papers to fix, use parallel subagents if your agent supports them: 2–3 papers each, with the paper paths, the question format and the `--check` command.
 

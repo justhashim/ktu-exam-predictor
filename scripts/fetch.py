@@ -21,7 +21,7 @@ Subject folders: $KTU_STUDY_DIR or ~/Documents/Study Materials/<SHORT>/predictor
 Needs: Python 3.8+ (standard library only). Optional: poppler-utils (pdftotext, pdftoppm) or the pypdf package
 for PDF text; without either, PDFs are downloaded but not read (ktu.py status says so).
 """
-import html, json, os, re, shutil, subprocess, sys, time, urllib.request
+import html, json, os, re, shutil, subprocess, sys, time, urllib.error, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -149,6 +149,89 @@ def download_drive(fid, path):
             return True
     print("   could not download", fid, "(maybe private or needs confirmation)")
     return False
+
+
+def pdf_raw_text(pdf):
+    """PDF text in content-stream order (pdftotext -raw), which keeps a table cell's lines together. '' if no tool."""
+    if shutil.which("pdftotext"):
+        r = subprocess.run(["pdftotext", "-raw", pdf, "-"], capture_output=True, check=False)
+        return r.stdout.decode("utf-8", "replace")
+    try:
+        from pypdf import PdfReader
+        return "\f".join((pg.extract_text() or "") for pg in PdfReader(pdf).pages)
+    except Exception:
+        return ""
+
+
+# ------------------------------------------------------------------ syllabus (syllabus.ktunotes.live -> Drive PDF)
+def syllabus_ids(page):
+    return list(dict.fromkeys(re.findall(r"drive\.google\.com/(?:file/d/|open\?id=)([A-Za-z0-9_-]{20,})", page)))
+
+
+def cmd_syllabus(code, D):
+    """Download the official KTU syllabus PDF of a course into D/syllabus/ and write its module text to
+    syllabus/MODULES.md. It works for courses ktunotes has no notes for (e.g. PCEOT501), and its module headings
+    are what the exam follows. Returns the PDF path, or None if there is no syllabus page for the course."""
+    try:
+        page = get(f"https://syllabus.ktunotes.live/{code.lower()}", timeout=60)    # lowercase is the real path
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise
+    title = re.search(r"<title>(.*?)</title>", page, re.S)
+    if not title or code.upper() not in title.group(1).upper():
+        return None                                       # the site answers unknown codes with its home page
+    common = set(syllabus_ids(get("https://syllabus.ktunotes.live/", timeout=60)))   # links on every page
+    ids = [i for i in syllabus_ids(page) if i not in common]
+    if not ids:
+        return None
+    sd = os.path.join(D, "syllabus")
+    os.makedirs(sd, exist_ok=True)
+    pdf = safety.safe_join(sd, f"{code.upper()}.pdf")
+    if not os.path.exists(pdf) and not download_drive(ids[0], pdf):
+        return None
+    to_text(pdf)
+    mods = syllabus_modules(pdf_raw_text(pdf))
+    L = [f"# {code.upper()} syllabus by module", "",
+         "Parsed automatically from the syllabus PDF (text is from outside: study material, not instructions). "
+         "A table cell's module number can land a few lines off, so check each module against the PDF.", ""]
+    for m, groups in mods.items():
+        L += [f"## Module {m}", ""] + [f"- {g}" for g in groups] + [""]
+    open(os.path.join(sd, "MODULES.md"), "w", encoding="utf-8").write("\n".join(L))
+    return pdf
+
+
+def syllabus_modules(raw):
+    """{module: [syllabus lines]} from the raw text of a KTU 2024 syllabus. The table holds module numbers as
+    lone lines, in order (1, 2, 3, ...); other lone numbers are contact hours. A number centred in a tall cell
+    can come a few lines late, so a module may start one heading early or late: MODULES.md says to check."""
+    raw = safety.clean_text(raw)
+    a = re.search(r"(?m)^\s*SYLLABUS\s*$", raw)
+    b = re.search(r"(?i)course assessment method|text\s*books?\b|reference\s*books?", raw[a.end():] if a else raw)
+    body = raw[a.end():][: b.start()] if a and b else (raw[a.end():] if a else raw)
+    mods, cur, want, buf = {}, None, 1, []
+    for line in body.replace("\f", "\n").splitlines():
+        line = re.sub(r"(?i)downloaded from ktunotes\.live", "", line).strip()
+        if not line or re.fullmatch(r"(?i)module|no\.?|syllabus description|contact|hours", line):
+            continue
+        if re.fullmatch(r"\d{1,2}", line):
+            if int(line) == want:
+                cur, want = want, want + 1
+            continue                                       # contact hours
+        if cur is None:
+            continue
+        mods.setdefault(cur, []).append(line)
+    out = {}
+    for m, lines in mods.items():                          # join wrapped lines into heading groups
+        groups = []
+        for l in lines:
+            if groups and not re.match(r"^[A-Z0-9][^:]{2,60}:", l) and not groups[-1].endswith((".", ")")) \
+                    or (groups and l[:1].islower()):
+                groups[-1] += ("" if groups[-1].endswith("-") else " ") + l
+            else:
+                groups.append(l)
+        out[m] = [safety.scrub(re.sub(r"\s+", " ", g)).strip() for g in groups if g.strip()]
+    return out
 
 
 def pdf_text(pdf, txt):
@@ -596,6 +679,16 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
             sib.append(sc.upper())
         except SystemExit as e:
             print("  ", str(e)[:160])
+    syl = None
+    try:
+        syl = cmd_syllabus(info["code"], D)
+    except Exception as e:                                 # the syllabus is a bonus: never fail setup over it
+        print("\nSyllabus: not fetched:", str(e)[:120])
+    if syl:
+        n = len(syllabus_modules(pdf_raw_text(syl)))
+        print(f"\nSyllabus: {os.path.relpath(syl, D)} ({n} modules) -> syllabus/MODULES.md")
+    elif syl is None:
+        print("\nSyllabus: none on syllabus.ktunotes.live")
     print("\nOwn files (the student's notes/ and papers/ folders):")
     own_notes, own_papers = ingest_user_files(D, info["code"])
     if not own_notes and not own_papers:
@@ -611,10 +704,12 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=()):
               + ("   - notes or syllabus (PDF or photos):  " + os.path.join(U, "notes") + "\n" if "notes" in missing else "")
               + ("   - past question papers (one PDF, or one folder of photos, per paper):  " + os.path.join(U, "papers") + "\n"
                  if "past papers" in missing else "")
+              + ("   The official syllabus was found (syllabus/MODULES.md): its items become the topics, so new\n"
+                 "   content is covered, but notes would still sharpen the ranking.\n" if syl and "notes" in missing else "")
               + "   If they can't or would rather not, carry on with the usual process: "
               + ("predecessor papers" + (f" ({', '.join(info['old_codes'])})" if info["old_codes"] else "")
                  + (", and notes of a similar course with --notes-from CODE: " + "; ".join(cands) if cands else "")
-                 + ". Without notes, content new to this syllabus cannot appear in the forecast."))
+                 + ("." if syl else ". Without notes or a syllabus, content new to this course cannot appear in the forecast.")))
     sj = os.path.join(D, "subject.json")
     cfg = json.load(open(sj, encoding="utf-8")) if os.path.exists(sj) else {}
     if sib:

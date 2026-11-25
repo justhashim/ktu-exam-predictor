@@ -26,7 +26,7 @@ An agent skill for students of APJ Abdul Kalam Technological University (KTU). I
 - **Plug and play.** Plain Python 3 standard library, with no `pip install`, no API keys and no setup.
 - **One command.** `ktu.py prepare "DAA"` runs the whole pipeline: fetch, extract, topics, tags, forecast.
 - **Any course, by code or name.** `PCCST502`, `DAA` and `design and analysis of algorithms` all work. Older-scheme versions are found automatically (PCCST502 → CST306).
-- **Topics that cover the current syllabus.** The ktunotes topic list is extended with notes sections it misses. Coarse topics are split into subtopics built from groups of similar past questions, and old-course questions that fit nothing go to an "off-syllabus" bucket instead of distorting the ranking.
+- **Topics that cover the current syllabus.** The ktunotes topic list is extended with notes sections it misses. When a course has no notes, the official syllabus is downloaded and each item becomes a topic. Coarse topics are split into subtopics built from groups of similar past questions, and old-course questions that fit nothing go to an "off-syllabus" bucket instead of distorting the ranking.
 - **Honest status.** Papers that fail the KTU marks check, scanned papers and low-confidence tags are listed, so you or your agent can see what's worth checking by hand.
 - **Module-balanced study order.** Each module carries equal marks, so the plan never leaves a whole module uncovered.
 - **Likely questions, with every past wording.** Questions are ranked by reuse, with current-scheme papers weighted higher, and there is an assembled "likely paper".
@@ -124,6 +124,7 @@ The output is `FORECAST.md` in the subject folder:
 ├── papers/          YOUR past papers: one PDF, or one folder of photos, per paper
 └── predictor/
     ├── FORECAST.md      study order, likely questions, likely paper
+    ├── syllabus/        official syllabus PDF + MODULES.md
     ├── subject.json     course, predecessors, exam pattern
     ├── topics.json      topics with notes pages (auto-drafted, editable)
     ├── papers.json      past questions with marks and topic tags (auto-drafted, editable)
@@ -187,6 +188,7 @@ Expect the same for any new branch: no papers until its first exams, and little 
 - **The ranking still beat random,** by about 18 points.
 - **The list could not contain what was new.** A whole ARM module (20 marks) and the 8051 programs and numericals (about 25 marks) never appeared in RAT206 papers.
 - **Similar courses would have helped.** The notes of PBECT404 (8051) and PBCST504 (ARM) covered almost all of it, and `setup` now suggests them. Their automatic topics were unusable, though, so build those topics by hand.
+- **The official syllabus helped most.** ktunotes' syllabus site had PCEOT501's syllabus, and every question on the paper was in it, ARM module included. With one topic per syllabus item plus the same old papers, studying 40% / 60% of the syllabus covered **67% / 90%** of marks (random: 49% / 68%), on strict tags. The parser was written after seeing this paper, so treat this as encouraging rather than a blind result. `prepare` now fetches the syllabus for every course.
 
 > [!IMPORTANT]
 > How well it works depends on the papers. Many KTU papers on ktunotes are scanned with noisy OCR. Their questions are drafted automatically and checked against the KTU marks pattern; scans with no text need transcribing, and `ktu.py status` lists them. Garbled drafts are left out of the forecast, and `FORECAST.md` warns when the data is too thin for the ranking to mean much.

@@ -17,7 +17,7 @@ DOC_HOSTS = {"img.shields.io", "www.python.org", "www.npmjs.com", "github.com", 
 GITHUB_REPO = "github.com/justhashim/ktu-exam-predictor"
 STDLIB = {"argparse", "ast", "collections", "contextlib", "datetime", "functools", "glob", "html", "io", "itertools",
           "json", "math", "os", "random", "re", "shutil", "statistics", "string", "subprocess", "sys", "tempfile",
-          "time", "unicodedata", "urllib", "urllib.parse", "urllib.request"}
+          "time", "unicodedata", "urllib", "urllib.error", "urllib.parse", "urllib.request"}
 LOCAL = {"fetch", "safety", "predict", "extract_questions", "ktu", "score"}
 OPTIONAL = {"pypdf"}                                    # only inside try/except, never required
 NETWORK_NAMES = {"urlopen", "build_opener", "Request", "HTTPRedirectHandler", "HTTPSHandler", "OpenerDirector"}

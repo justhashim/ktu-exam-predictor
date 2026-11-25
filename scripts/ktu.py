@@ -169,6 +169,35 @@ def heading(pg):
     return None
 
 
+def syllabus_topics(D):
+    """[(module, item, heading)] from the course syllabus (syllabus/<CODE>.pdf, fetched by setup): one topic per
+    item in each module's description, e.g. "8051 Interrupt programming: interrupts, priority, ..." gives
+    "8051 interrupts" and "Interrupt priority in 8051" under that heading. [] if there is no syllabus."""
+    sd = os.path.join(D, "syllabus")
+    pdfs = [f for f in sorted(os.listdir(sd)) if f.lower().endswith(".pdf")] if os.path.isdir(sd) else []
+    if not pdfs:
+        return []
+    out = []
+    for m, groups in fetch.syllabus_modules(fetch.pdf_raw_text(os.path.join(sd, pdfs[0]))).items():
+        for g in groups:
+            if g == safety.WITHHELD:
+                continue
+            h = re.match(r"^([^:]{3,70}):\s*(.*)$", g)
+            head, rest = (h.group(1).strip(), h.group(2)) if h else ("", g)
+            parts = re.split(r"\s*[,;:]\s+|\.\s+|\s+[\u2013-]\s*|[\u2013-]\s+|(?<=[A-Za-z0-9)])[\u2013-](?=[A-Z])|(?<=[A-Z][A-Z])-(?=[a-z]{4,})|\s*\u2013\s*", rest)
+            items = []
+            for it in (re.sub(r"(?i)\s+(and|or)$", "", x.strip(" .,-\u2013")) for x in parts):
+                if not it or it.lower() in ("etc", "and") or re.fullmatch(r"[\d\W]+", it):
+                    continue
+                if items and (len(it.split()) <= 1 or it.lower().startswith(("and ", "or "))):
+                    items[-1] += ", " + it                  # "addition, subtraction" belong to the item before
+                else:
+                    items.append(it)
+            for it in items or [head]:
+                out.append((m, it[:90], head))
+    return out
+
+
 def draft_topics(D, redo=False):
     """topics.json from (1) the ktunotes important-topics list, (2) notes pages that no listed topic covers
     (new-syllabus content the list misses), (3) notes sections for modules the list lacks, plus an
@@ -268,6 +297,18 @@ def draft_topics(D, redo=False):
                 t[field] = [f"M{t['module']}:{a}-{b}" if a != b else f"M{t['module']}:{a}" for _, a, b in rr]
             if rr:
                 t[field + "_src"] = rr      # [notes file, first page, last page]
+    # 3b) modules still without topics, and a syllabus: one topic per syllabus item. Better than past-question
+    #     clusters: it lists what is new to the course (PCEOT501's ARM module was in its syllabus, in no old paper).
+    have = {t["module"] for t in topics.values()}
+    syl_used = False
+    for m, item, head in syllabus_topics(D):
+        if m in mods and m not in have:
+            name = item if len(item.split()) >= 3 or not head else f"{head}: {item}"
+            add(f"M{m}_{item}", {"name": name, "module": m, "syllabus": "in", "model": False, "notes": [],
+                                 "weight_hint": 1.0, "examples": [head] if head else [], "source": "syllabus"})
+            syl_used = True
+    if syl_used and data:      # model-paper flags from the ktunotes list, as for notes topics
+        pass
     # 4) LAST RESORT for modules with no topics at all (no topic list, no notes text): groups of past questions in
     #    that module (module known from the question number). The course's own papers if it has any; otherwise
     #    the predecessors' papers, their modules mapped onto this course's (a guess: see old_module()).
@@ -559,6 +600,9 @@ def status(D, quiet=False):
         todo.append(f"only {len(used)} past papers have questions: the history part of the forecast is weak or absent")
     if no_topics:
         todo.append(f"modules {no_topics} have no topics: add them to topics.json")
+    if any(t.get("source") == "syllabus" for t in T.values()):
+        todo.append("topics come from the syllabus: check syllabus/MODULES.md against the PDF (a module number can "
+                    "land a few lines off) and fix `module` in topics.json where a line sits in the wrong module")
     withheld = [f"{p['id']} {q['q']}" for p in used for q in p.get("questions", []) if q.get("text") == safety.WITHHELD]
     if withheld:
         todo.append(f"SECURITY: {len(withheld)} question(s) held text aimed at an AI agent and were withheld ("

@@ -520,6 +520,10 @@ def main():
             warnings.append(f"Module {m}: topic probabilities are nearly equal, so the order within it is weak.")
     if not any(m["module"] for m in topics.values()):
         warnings.append("No topics.")
+    elif any(m.get("source") == "syllabus" for m in topics.values()) and not any(notes_pages(m) for m in topics.values()):
+        warnings.append("No notes: the topics are the items of the official syllabus, all weighted the same, so the "
+                        "order comes only from older papers and is weak. The list itself is the useful part: it "
+                        "includes content no old paper had. Cover every item of every module.")
     elif all(m.get("source") in ("past questions", "bucket") for m in topics.values()):
         warnings.append("No notes or syllabus: every topic comes from older papers, so content new to this course "
                         "cannot appear here, and modules are mapped from the old course by guess. On PCEOT501 (Nov 2026) "
