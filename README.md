@@ -55,19 +55,28 @@ It takes about a minute, and it's free: plain Python, nothing to install from pi
 
 Then we take the **real exam paper** and count how many marks you could have answered each way. The forecast only gets material from **before** the exam: no peeking at the paper it's tested on.
 
-| Real exam (Nov 2026) | Study the top 40% of the syllabus | Study the top 60% |
-|---|---|---|
-| **Computer Networks** | **85%** of marks with the tool, 54% at random | **95%** with the tool, 73% at random |
-| **Microcontrollers & Embedded Systems** (PCEOT501) | **67%** with the tool, 49% at random | **90%** with the tool, 68% at random |
-| **Maths for Electrical & Physical Science 3** (GYMAT301) | **72%** with the tool, 48% at random | **93%** with the tool, 67% at random |
+**Strict and lenient.** We count marks two ways, because a question doesn't always match a topic name exactly:
+- **Lenient:** a question counts if the topic you studied includes it, even when the topic's name doesn't say so. For example, PPP is explained inside the notes for "Framing", so studying Framing covers a PPP question.
+- **Strict:** a question counts only if a topic on the list is clearly about it. If no topic is named for it, it counts as missed, even if it's somewhere in the notes.
+
+Strict is the tougher, safer number. The truth for a careful student is usually in between.
+
+| Real exam (Nov 2026) | Top 40% studied: strict | Top 40%: lenient | Top 60%: strict | Top 60%: lenient |
+|---|---|---|---|---|
+| **Computer Networks** (PCCST501) | **65%** (random 40%) | **85%** (random 54%) | **83%** (random 56%) | **95%** (random 73%) |
+| **Microcontrollers & Embedded Systems** (PCEOT501) | **67%** (random 49%) | **67%** (random 49%) | **90%** (random 68%) | **90%** (random 68%) |
+| **Maths for Electrical & Physical Science 3** (GYMAT301) | **67%** (random 46%) | **72%** (random 48%) | **88%** (random 64%) | **93%** (random 67%) |
+| **Maths for Computer & Information Science 3** (GAMAT301) | **77%** (random 49%) | **90%** (random 53%) | **90%** (random 66%) | **95%** (random 72%) |
+
+Each cell is the share of the paper's marks you could answer. For PCEOT501 the topics *are* the syllabus items, so every question matched a named topic and strict equals lenient.
 
 In plain words:
-- **Studying in the tool's order beat picking topics at random** on all three papers.
+- **Studying in the tool's order beat picking topics at random** on all four papers, on both counts: by 18 to 38 points at 40% of the syllabus.
 - **Past questions do come back.** On the GYMAT301 paper, two of the long questions were near-copies of earlier GYMAT301 questions.
 - **It works even with almost nothing to go on.** PCEOT501 is from a brand-new branch: no notes, no past papers of its own. Because the tool reads the official syllabus, a 20-mark module that no old paper had was still on the list.
 
 > [!WARNING]
-> **That's only three real papers, so treat the numbers as rough.** The tool tells you which **topics** matter, not the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
+> **That's only four real papers, so treat the numbers as rough.** The tool tells you which **topics** matter, not the exact questions. Cover every module, because each one carries the same marks. No forecast replaces studying.
 
 ## Install
 
@@ -175,10 +184,21 @@ For each topic *t*, `P(t is asked) = α · history(t) + (1 − α) · prior(t)`,
 - **Syllabus share:** sized by notes pages, not topic count, because counting topics flatters coarse lists.
 - **Attainable marks:** Part A, plus the better option of each Part B pair. A question counts only if every topic it is tagged with was studied.
 - **Random baseline:** the mean over 300–500 shuffled orders.
-- **Tagging:** the real paper's questions are tagged by hand, so mistakes in the automatic tags can't flatter the score.
+- **Tagging:** the real paper's questions are tagged by hand, so mistakes in the automatic tags can't flatter the score. Two tag sets:
+  - **lenient:** the topic whose notes pages or past questions hold the content, even if its name doesn't (CN: PPP under Framing, PCM under Modulation; GYMAT301: Maclaurin series under Laurent series)
+  - **strict:** only a topic named for the content; otherwise a `NEW_*` tag that no forecast can cover. `score.py --tags strict` uses this set.
 - **Freezing:** the forecast uses pre-exam material only. `score.py` scores a real paper against a frozen snapshot of the forecast.
 
-Full curves, current version, Nov 2026 papers:
+Strict and lenient at 40% / 60% of the syllabus. "Most reachable" is what studying every topic would give:
+
+| Paper | Strict | Lenient | Random (strict / lenient) | Most reachable: strict / lenient |
+|---|---|---|---|---|
+| CN (PCCST501) | 65% / 83% | 85% / 95% | 40–56% / 54–73% | 83% / 100% |
+| PCEOT501 | 67% / 90% | 67% / 90% | 49–68% | 100% |
+| GYMAT301 | 67% / 88% | 72% / 93% | 46–64% / 48–67% | 95% / 100% |
+| GAMAT301 | 77% / 90% | 90% / 95% | 49–66% / 53–72% | 95% / 100% |
+
+Full lenient curves, current version, Nov 2026 papers:
 
 | Syllabus studied | 20% | 30% | 40% | 50% | 60% | 70% | 80% |
 |---|---|---|---|---|---|---|---|
@@ -189,15 +209,21 @@ Full curves, current version, Nov 2026 papers:
 | **GYMAT301:** forecast | 52% | 57% | 72% | 72% | 93% | 100% | 100% |
 | GYMAT301: fully automatic | 52% | 52% | 62% | 72% | 93% | 100% | 100% |
 | GYMAT301: random | 26% | 38% | 48% | 58% | 67% | 76% | 85% |
+| **GAMAT301:** forecast | 47% | 73% | 90% | 95% | 95% | 95% | 100% |
+| GAMAT301: fully automatic | 68% | 85% | 90% | 95% | 95% | 95% | 100% |
+| GAMAT301: random | 30% | 41% | 53% | 63% | 72% | 82% | 89% |
 
 **Caveats:**
-- **n = 3 papers.**
+- **n = 4 papers.**
 - **CN:** questions were tagged to the topic whose notes pages hold the content. The ktunotes topic list was checked for leakage: no Nov 2026 tags, and none of the paper's distinctive questions.
 - **PCEOT501:** no notes, so the topics are syllabus items, with 7 RAT206 papers as history. The syllabus parser was written after this paper was seen, so it isn't a blind result.
 - **GYMAT301:** blind. Every forecast was frozen before the paper was opened, and the newest download was the May 2026 paper.
   - The "forecast" row is the skill run as `SKILL.md` directs: the course's own two past papers (Nov 2025, May 2026) were transcribed from page images, because PDF text garbles maths. The flagged older course, MAT102, was left out.
   - The "fully automatic" row skipped that step: it dropped both garbled papers and ranked from MAT102 papers and the model paper.
   - Two Part B questions repeated earlier GYMAT301 questions.
+- **GAMAT301:** blind, frozen the same way. There was no older course. The "forecast" row has the Nov 2025 and May 2026 papers and the model paper transcribed. The fully automatic run read this paper's text well enough, so it did as well or better.
+  - Strict misses: two general continuous-random-variable questions (find c for a pdf; the mean and variance of 2X − 3). The topic list has named distributions only, with no general "continuous random variable" topic.
+  - A random-walk question was covered only because the skill added that topic from the syllabus.
 - **The full record** is in `references/lessons.md`.
 
 ## Command line
