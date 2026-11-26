@@ -8,7 +8,7 @@ If the local study folder has one, the full record is in `<study dir>/CNW/FINDIN
 - **14 of 60 marks fell on topics missing from the list:** PPP, 4B/5B and 8B/10B, PCM, scrambling. They were new-scheme notes content that never appeared in old papers.
 - **The setter followed the ktunotes notes and the textbook.** All 26 sub-questions were in the notes, several as the textbook's own worked examples (Stop-and-Wait 1 Mbps / 20 ms / 15 packets; MAC 47:20:1B:2E:08:EE; FDM with guard bands).
 - **About half the sub-questions were reworded old-course questions.** Exact wording rarely repeats.
-- **The student who used it had one night,** got through about 7 topics in rank order, and did badly.
+- **The student who used it had one night,** got through about 7 topics in rank order. The paper was hard; results are not out yet.
 
 **What was changed (now the method in `scripts/predict.py`):**
 - **Topics come from notes sections**, with page counts.
