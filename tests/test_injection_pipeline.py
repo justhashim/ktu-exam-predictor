@@ -172,10 +172,10 @@ class TestOwnFiles(unittest.TestCase):
     def test_hostile_file_names_and_symlinks(self):
         U_ = os.path.join(U.TMP, "own")
         D = os.path.join(U_, "predictor")
-        for sub in ("notes", "papers", os.path.join("papers", "..evil.."), os.path.join("predictor", "pyq")):
+        for sub in ("notes", "papers", os.path.join("papers", "..evil"), os.path.join("predictor", "pyq")):
             os.makedirs(os.path.join(U_, sub), exist_ok=True)
         open(os.path.join(U_, "notes", "M1 \u202efdp.notes.pdf"), "wb").write(b"%PDF-1.4")
-        open(os.path.join(U_, "papers", "..evil..", "page1.jpg"), "wb").write(b"\xff\xd8")
+        open(os.path.join(U_, "papers", "..evil", "page1.jpg"), "wb").write(b"\xff\xd8")
         secret = os.path.join(U.TMP, "secret_key")
         open(secret, "w").write("PRIVATE")
         try:

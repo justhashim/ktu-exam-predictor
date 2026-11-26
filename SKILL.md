@@ -111,7 +111,7 @@ That is four papers, so it's a rough guide. The fixes below still help, most of 
 
 **What to fix, highest value first.** Re-run `python3 $S/ktu.py predict "<course>"` after any of these:
 1. **Scanned papers** (no questions), including the model paper:
-   - read `pyq/img/*.png` (model paper: `model/img/`) or the PDF
+   - read `pyq/img/*.jpg` (model paper: `model/img/`) or the PDF
    - write `questions[]` in `papers.json`: `{"q": "A1"|"B11a", "marks": 3, "topics": [], "text": "..."}`
    - run `python3 $S/ktu.py autotag "<course>"`
 2. **Papers that failed the marks check** (`pyq/EXTRACTION.md`):
