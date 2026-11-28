@@ -106,3 +106,21 @@ Snapshot `DAA/predictor/blind_nov2026/`, paper `nov2026_actual.json`.
   - **Before grading a forecast, ask which list the student studied from, and score that one.** Here the study page's list and `FORECAST.md` gave opposite verdicts on the same paper.
   - **When the past-paper-marks ranking and the notes-weighted blend disagree, don't trust the blend's order on its own.** On this paper the notes prior ranked long theory sections above the topics the setter asks every time. That's one paper, so check it on the next course rather than treating it as a rule.
   - **For a 2024-scheme course whose papers touch nearly every topic,** tell the student to cover every topic and drill the repeat list. Don't let them skip low-ranked topics. Recurrence topics in a "Module 1 = analysis" course are Part B staples whatever the notes prior says.
+
+**Where the study page's 11 missing marks went (checked 28 Nov 2026).** Scored with the exam's choices (all of Part A, the better question of each module in Part B):
+- **Top 15 of 29 topics: 49 of 60.** Every lost mark came from topics ranked 16 to 27:
+  - **Module 1 Part B, 4 marks.** Each question paired a recurrence method near the top (recursion tree #11, Master #17) with one near the bottom (substitution #25, iteration #27). Answering either question needed both.
+  - **Module 3 Part B, 4 marks.** Each question paired a top-10 topic (fractional knapsack #8, matrix chain #9) with a shortest-path algorithm just below the cut (Floyd–Warshall #16, Dijkstra #19).
+  - **A4, 3 marks:** topological sort, #18.
+- **Plus the predicted paper: 56.** It held topological sort and Floyd–Warshall. Module 1 still lost 4: the main paper had the Master theorem and the recursion tree, but not substitution or iteration.
+- **Plus the predicted paper's backups: 60 of 60.** The Module 1 backup was "(a) substitution method, (b) iteration", which is nearly the pairing the setter used.
+
+**Why:**
+1. **One heavily asked topic was split into four small ones.** Recurrences were in every past paper: all 8 CST306 papers (10 to 25 of 100 marks) and the model paper. Split into recursion tree, Master, substitution and iteration, each looked minor. Together they average about 5.8 marks a paper, more than the page's #1 topic (randomized algorithms, about 4.6). The skill's own `split_topics` can do the same, which is why `FORECAST.md` ranked them 18, 22 and 25.
+2. **Part B questions come in pairs.** A 9-mark question has two parts, usually from two topics in the module. Answering one question per module only helps if you know both parts of one question, so a top topic is worth its marks only when its usual partner is studied too.
+3. **The cut-off fell where four topics sat close together** (ranks 16 to 19), and they cost 7 of the 11 marks.
+
+**How to apply:**
+- **Rank parts of one topic as a family**, by their combined marks, and teach them together.
+- **For each module, check that the study list covers both parts of at least one Part B question**, using the pairs past papers set.
+- **Tell the student the backups count.** On this paper they held the last 4 marks.
