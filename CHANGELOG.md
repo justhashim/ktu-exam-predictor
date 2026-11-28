@@ -7,7 +7,9 @@ All notable changes to the KTU exam predictor skill. The format follows Keep a C
 
 When you release, bump `metadata.version` in `SKILL.md` to match the newest heading here; a test checks the two agree.
 
-## [Unreleased]
+## [1.3.0] - 2026-11-28
+
+Ranks parts of one topic together, says how deep each module's Part B needs a student to go, and lists the notes sections inside each topic. Built from two real papers scored blind: DAA lost 11 marks to a heavily asked topic split into four small ones, and CN to sections hidden inside broader topics.
 
 ### Added
 - **Topic families.** Parts of one topic are ranked as one family, by the chance any of them is asked (pieces split from one topic: by their best piece), and sit together in the study order. A family comes from a `family` field in `topics.json`, a split topic's parent, or 2 to 6 topics in a module sharing a "Name:" prefix (not generic ones like "Module 1:"). `"family_order": false` in `subject.json` turns it off.
@@ -76,6 +78,7 @@ First tagged release.
 - `status`, `predict` and `autotag` subcommands for iterating, and `score.py` for blind scoring after the real exam.
 - Measured on four real Nov 2026 papers: studying the top 40% / 60% of topics covered 67–90% / 90–95% of marks (lenient), against 48–54% / 67–73% for random topic choice.
 
+[1.3.0]: https://github.com/justhashim/ktu-exam-predictor/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/justhashim/ktu-exam-predictor/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/justhashim/ktu-exam-predictor/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/justhashim/ktu-exam-predictor/releases/tag/v1.0.0
