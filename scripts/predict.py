@@ -173,13 +173,37 @@ def materials_report(D):
     L.append(f"- Used in the forecast: {n(len(used), 'paper')} ({sum(len(p['questions']) for p in used)} questions)")
     imgs = os.path.join(D, "pyq", "img")
     img_files = os.listdir(imgs) if os.path.isdir(imgs) else []
+
+    def text_size(p):
+        t = os.path.join(D, os.path.splitext(p["source"])[0] + ".txt") if p.get("source") else ""
+        return os.path.getsize(t) if t and os.path.exists(t) else 0
+
+    def check_numbers(p):
+        """(missing, odd, total): question numbers the paper's pattern has but its drafts lack, and drafted numbers
+        the pattern doesn't have. ktunotes papers are scans with an OCR text layer; the OCR can drop question numbers
+        or a Part B heading, so a used paper can be incomplete or misnumbered (B7a ... when Part B starts at 11)."""
+        c = p.get("course") or cfg.get("code", "")
+        na, nb = (10, 5) if len(c) <= 6 else (cfg.get("pattern", {}).get("part_a", 8), cfg.get("modules", 4))
+        want = [f"A{i}" for i in range(1, na + 1)] + [f"B{i}" for i in range(na + 1, na + 1 + 2 * nb)]
+        got = {m.group(0) for q in p.get("questions", []) for m in [re.match(r"[AB]\d+", q.get("q", ""))] if m}
+        odd = sorted(got - set(want), key=lambda x: (x[0], int(x[1:])))
+        return [x for x in want if x not in got], odd, len(want)
+
+    gaps = []
     for p in papers:
+        label = p.get("label", p.get("id", "?"))
         if used_in_forecast(p):
+            miss, odd, total = check_numbers(p)
+            if miss or odd:
+                gaps.append(f"{label}{course_tag(label, p.get('course'))}: {total - len(miss)} of {total} questions"
+                            + (f"; missing {', '.join(miss)}" if miss else "")
+                            + (f"; drafted under numbers this paper doesn't have: {', '.join(odd)}" if odd else "")
+                            + " (read them from pyq/img/)")
             continue
         r = by_src.get(p.get("source")) or {}
         stem = os.path.splitext(os.path.basename(p.get("source") or ""))[0]
-        scan = r.get("read") in ("scan", "photo") or p.get("source") is None or \
-            bool(stem and any(f.startswith(stem + "-") for f in img_files))
+        scan = r.get("read") in ("scan", "photo") or p.get("source") is None or (text_size(p) < 3000 and bool(
+            stem and any(f.startswith(stem + "-") for f in img_files)))
         if p.get("duplicate_of"):
             why = f"duplicate of {labels.get(p['duplicate_of'], p['duplicate_of'])}"
         elif p.get("questions"):
@@ -190,10 +214,14 @@ def materials_report(D):
             why = "not read: no PDF text tool installed"
         elif scan:
             why = "no questions yet (scan: transcribe it from pyq/img/)"
+        elif text_size(p) >= 3000:
+            why = "no questions found in its text (likely a scan with poor OCR: read it from pyq/img/)"
         else:
             why = "no questions drafted (see pyq/EXTRACTION.md)"
-        label = p.get("label", p.get("id", "?"))
         missed.append(f"{label}{course_tag(label, p.get('course'))}: {why}")
+    if gaps:
+        L.append("- Read with gaps (used, but the OCR text lost some questions):")
+        L += [f"  - {g}" for g in gaps]
     if missed:
         L.append("- Not used:")
         L += [f"  - {m}" for m in missed]
@@ -206,7 +234,13 @@ def materials_report(D):
         L.append(f"- Model paper: {(man or {}).get('model', 'none')}")
     nd = os.path.join(D, "notes")
     on_disk = sorted(f for f in os.listdir(nd) if f.lower().endswith(".pdf")) if os.path.isdir(nd) else []
-    with_text = [f for f in on_disk if os.path.exists(os.path.join(nd, f[:-4] + ".txt"))]   # what notes_pages() reads
+    def has_text(f):          # the same rule as fetch.to_text: a scan averages under 300 bytes of text a page
+        t = os.path.join(nd, f[:-4] + ".txt")
+        if not os.path.exists(t):
+            return False
+        s = open(t, encoding="utf-8", errors="replace").read()
+        return len(s.encode("utf-8")) / max(1, s.count("\f")) >= 300
+    with_text = [f for f in on_disk if has_text(f)]            # what notes_pages() gets real topics from
     if man:
         nr = [r for r in recs if r["kind"] == "notes"]
         ok = [r for r in nr if r["downloaded"]]
@@ -240,8 +274,10 @@ def materials_report(D):
     if any(not r["downloaded"] or r["read"] == "unreadable" for r in recs) or \
             any("failed" in str((man or {}).get(k, "")) for k in ("syllabus", "model")):
         fixes.append("rerun prepare: it tries the failed and damaged files again and keeps everything already read")
-    if any("scan:" in m for m in missed) or (model and not model[0].get("questions")):
+    if any("pyq/img/" in m for m in missed) or (model and not model[0].get("questions")):
         fixes.append("transcribe the scanned papers (step 3) so they count")
+    if gaps:
+        fixes.append("read the missing questions from pyq/img/ into papers.json (step 3)")
     if fixes:
         L.append("- To get what was missed: " + "; ".join(fixes))
     return [safety.scrub(x) for x in L]
