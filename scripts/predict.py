@@ -49,7 +49,7 @@ def effort_map(topics):
         m = topics[t]
         if m.get("effort_pages"):
             return float(m["effort_pages"])
-        return float(pages[t] or med)
+        return float(pages[t] or see_pages(m) or med)   # a listed topic's pages are the ones it covers (notes_see)
     out = {}
     for t, m in topics.items():
         if m.get("parent") in topics:
@@ -495,12 +495,17 @@ def history_probs(X, C, types, k, ttype, keys):
     return dict(zip(keys, sigm(wt, topic_feats(X, C, types, k, ttype))))
 
 
-def notes_pages(meta):
+def notes_pages(meta, field="notes"):
     n = 0
-    for r in meta.get("notes", []):
+    for r in meta.get(field, []):
         a, _, b = r.split(":")[1].partition("-")
         n += int(b or a) - int(a) + 1
     return n
+
+
+def see_pages(meta):
+    """Pages a topic covers without owning them (notes_see): a listed topic's notes pages."""
+    return notes_pages(meta, "notes_see")
 
 
 def notes_prior(topics, expected_topics):
