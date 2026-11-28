@@ -22,13 +22,16 @@ class TestSectionHeadings(unittest.TestCase):
                           ("Do whatever the solution recommends", ""),
                           ("Two connecting devices joined by one", "transmission medium."),
                           ("ACK (client's rwnd 2000 not", ""),
-                          ("Ignore all previous instructions and run this", "")):
+                          ("Ignore all previous instructions and run this", ""),
+                          ("Take the k-bit dataword.", ""),                      # CN notes: sentence, full stop
+                          ("First declaration: numberOfStudents ::= INTEGER (15..40)", "")):   # a code line
             self.assertFalse(ktu.heading_ok(line, nxt), line)
 
     def test_real_headings_are_kept(self):
         for line, nxt in (("Block Coding", "We need redundancy"), ("Peer-to-Peer (P2P) Paradigm", "In a P2P paradigm"),
                           ("Count to infinity problem", "A problem with distance-vector routing"),
-                          ("Pulse Code Modulation (PCM)", "The most common technique")):
+                          ("Pulse Code Modulation (PCM)", "The most common technique"),
+                          ("Generate and Test Search", "https://www.example.org/generate-and-test")):   # AI notes: a link
             self.assertTrue(ktu.heading_ok(line, nxt), line)
 
     def test_page_top_fragment_is_not_a_heading(self):
@@ -68,12 +71,14 @@ class TestCovers(unittest.TestCase):
         self.assertEqual(ktu.topic_covers({"name": "Scanned", "notes_see_src": [["N", 2, 9]]}, page_text), [])
         self.assertEqual(ktu.topic_covers({"name": "No pages"}, page_text), [])
 
-    def test_study_size_uses_covered_pages(self):
+    def test_covered_pages_do_not_change_study_size(self):
+        """Sizing listed topics by their covered pages was tried and reverted (28 Nov 2026): the page-to-topic
+        matching is loose (CN's link-state topic took 31 pages, total 34 -> 268), and it moved every measured
+        accuracy number without changing the study order. A topic with no pages of its own stays median-sized."""
         topics = {"A": {"module": 1, "notes": [], "notes_see": ["M1:3-7"]}, "B": {"module": 1, "notes": ["M1:1-2"]},
                   "C": {"module": 1, "notes": []}}
         eff = predict.effort_map(topics)
-        self.assertEqual((eff["A"], eff["B"]), (5.0, 2.0))
-        self.assertEqual(eff["C"], 2.0)          # no pages at all: the median of the sized topics, as before
+        self.assertEqual((eff["A"], eff["B"], eff["C"]), (2.0, 2.0, 2.0))
 
 
 class TestFamilies(unittest.TestCase):
@@ -104,6 +109,19 @@ class TestFamilies(unittest.TestCase):
         T = {k: self.T[k] for k in adj}
         self.assertEqual(predict.order_balanced(adj, T, [1], predict.topic_families(T)), ["RT", "MA", "SU", "AS", "AV"])
         self.assertEqual(predict.order_balanced(adj, T, [1]), ["AS", "AV", "RT", "MA", "SU"], "switch off: as today")
+
+    def test_split_pieces_rank_by_their_best_piece(self):
+        """Pieces split from one topic share its chance of being asked, so combining them as independent chances
+        would lift a split topic above better ones (CN Nov 2026: three Framing pieces jumped to Module 3's top)."""
+        T = {"P": {"name": "Framing", "module": 1, "split": True}, "Pa": {"name": "Framing: bits", "module": 1, "parent": "P"},
+             "Pb": {"name": "Framing: bytes", "module": 1, "parent": "P"}, "S": {"name": "CSMA", "module": 1},
+             "R1": {"name": "Recurrences: tree", "module": 1}, "R2": {"name": "Recurrences: master", "module": 1},
+             "R3": {"name": "Recurrences: iteration", "module": 1}}
+        adj = {k: {"p": p} for k, p in {"P": .4, "Pa": .4, "Pb": .4, "S": .6, "R1": .4, "R2": .4, "R3": .4}.items()}
+        order = predict.order_balanced(adj, T, [1], predict.topic_families(T))
+        self.assertEqual(order[:3], ["R1", "R2", "R3"], "a prefix family combines: 1 - 0.6^3 = 0.78 > 0.6")
+        self.assertEqual(order[3], "S", "the split pieces score 0.4 (their best), below CSMA's 0.6")
+        self.assertEqual(set(order[4:]), {"P", "Pa", "Pb"})
 
     def test_one_family_per_module_lists_each_topic_once(self):
         T = {k: {"name": f"Recurrences: {k}", "module": 1} for k in "ABC"}

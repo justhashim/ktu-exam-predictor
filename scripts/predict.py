@@ -49,7 +49,7 @@ def effort_map(topics):
         m = topics[t]
         if m.get("effort_pages"):
             return float(m["effort_pages"])
-        return float(pages[t] or see_pages(m) or med)   # a listed topic's pages are the ones it covers (notes_see)
+        return float(pages[t] or med)
     out = {}
     for t, m in topics.items():
         if m.get("parent") in topics:
@@ -495,17 +495,12 @@ def history_probs(X, C, types, k, ttype, keys):
     return dict(zip(keys, sigm(wt, topic_feats(X, C, types, k, ttype))))
 
 
-def notes_pages(meta, field="notes"):
+def notes_pages(meta):
     n = 0
-    for r in meta.get(field, []):
+    for r in meta.get("notes", []):
         a, _, b = r.split(":")[1].partition("-")
         n += int(b or a) - int(a) + 1
     return n
-
-
-def see_pages(meta):
-    """Pages a topic covers without owning them (notes_see): a listed topic's notes pages."""
-    return notes_pages(meta, "notes_see")
 
 
 def notes_prior(topics, expected_topics):
@@ -592,6 +587,15 @@ def family_score(ps):
     return 1 - q
 
 
+def group_score(members, adj, topics):
+    """A family's score in the study order. Pieces split from one topic (split_topics: "parent"/"split") share that
+    topic's chance of being asked, so they score by their best piece; other families by family_score."""
+    ps = [adj[t]["p"] for t in members]
+    if len(members) > 1 and any(topics[t].get("parent") or topics[t].get("split") for t in members):
+        return max(ps)
+    return family_score(ps)
+
+
 def use_families(cfg):
     """subject.json "family_order": rank topic families as one unit (default on)."""
     return bool(cfg.get("family_order", True))
@@ -600,7 +604,7 @@ def use_families(cfg):
 def order_balanced(adj, topics, modules, families=None):
     """Module-balanced study order: each module's topics by p, modules interleaved round by round. With families
     ({topic: label}, see topic_families), each module's families are ranked by family_score and each family's
-    members follow one another, highest p first."""
+    members follow one another, highest p first. Split pieces of one topic rank by their best piece (group_score)."""
     per = {}
     for m in modules:
         ts = [t for t in adj if topics[t]["module"] == m]
@@ -608,7 +612,7 @@ def order_balanced(adj, topics, modules, families=None):
             groups = {}
             for t in ts:
                 groups.setdefault(families.get(t, t), []).append(t)
-            ranked = sorted(groups.values(), key=lambda g: -family_score([adj[t]["p"] for t in g]))
+            ranked = sorted(groups.values(), key=lambda g: -group_score(g, adj, topics))
             per[m] = [t for g in ranked for t in sorted(g, key=lambda t: -adj[t]["p"])]
         else:
             per[m] = sorted(ts, key=lambda t: -adj[t]["p"])

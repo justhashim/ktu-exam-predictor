@@ -171,14 +171,14 @@ def heading_ok(line, next_line=""):
     words = line.split()
     if not (1 <= len(words) <= 8) or not line[0].isupper() or line.count("(") != line.count(")"):
         return False
-    if line.endswith((",", "-", ":", ";")) or words[-1].lower().strip(".") in HEADING_STOP_END:
-        return False
+    if line.endswith((",", "-", ":", ";", ".")) or words[-1].lower() in HEADING_STOP_END or "=" in line:
+        return False                         # "Take the k-bit dataword." is a sentence; "x ::= INTEGER" is code
     if len(words) >= 5:
         long_words = re.findall(r"[A-Za-z]{4,}", line)
         if long_words and sum(w[0].islower() for w in long_words) > len(long_words) / 2:
             return False
-    if next_line.strip()[:1].islower():
-        return False
+    if next_line.strip()[:1].islower() and not next_line.strip().startswith("http"):
+        return False                         # the sentence carries on (a link on the next line doesn't)
     return not safety.looks_like_injection(line) and not HEADING_SKIP.match(line)
 
 

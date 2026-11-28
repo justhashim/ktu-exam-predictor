@@ -10,12 +10,9 @@ When you release, bump `metadata.version` in `SKILL.md` to match the newest head
 ## [Unreleased]
 
 ### Added
-- **Topic families.** Parts of one topic are ranked as one family, by the chance any of them is asked, and sit together in the study order. A family comes from a `family` field in `topics.json`, a split topic's parent, or 2 to 6 topics in a module sharing a "Name:" prefix (not generic ones like "Module 1:"). `"family_order": false` in `subject.json` turns it off.
+- **Topic families.** Parts of one topic are ranked as one family, by the chance any of them is asked (pieces split from one topic: by their best piece), and sit together in the study order. A family comes from a `family` field in `topics.json`, a split topic's parent, or 2 to 6 topics in a module sharing a "Name:" prefix (not generic ones like "Module 1:"). `"family_order": false` in `subject.json` turns it off.
 - **Part B depth line** in `FORECAST.md` and `results.json` (`part_b_depth`): per module, how many of its top topics past papers needed to answer one Part B question in full.
 - **Covers lists.** Each topic lists the notes sections it covers (`covers` in `topics.json`, a Covers column in `FORECAST.md`), from page-top and numbered mid-page headings: "Digital line coding" shows Block Coding, Scrambling, PCM.
-
-### Changed
-- A topic with no notes pages of its own takes the pages it covers as its study size.
 
 ### Fixed
 - Sentence fragments at the top of a notes page ("Two connecting devices joined by one") no longer become topics.
