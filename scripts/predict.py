@@ -292,6 +292,12 @@ def load(d):
     topics = json.load(open(os.path.join(d, "topics.json"), encoding="utf-8"))["topics"]
     for t in topics.values():
         t["name"] = safety.scrub(str(t.get("name", "")))
+        if t.get("covers"):           # from downloaded notes; results.json is read by an agent
+            t["covers"] = [c for c in (safety.scrub(str(x)) for x in t["covers"]) if c != safety.WITHHELD]
+        if t.get("family"):           # may be hand-edited
+            t["family"] = safety.scrub(str(t["family"]))
+            if t["family"] == safety.WITHHELD:
+                del t["family"]
     pp = os.path.join(d, "papers.json")
     papers = json.load(open(pp, encoding="utf-8"))["papers"] if os.path.exists(pp) else []
     papers = [p for p in papers if p.get("questions") and not p.get("duplicate_of")]   # skip empty / duplicate papers
