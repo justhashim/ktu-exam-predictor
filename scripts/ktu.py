@@ -684,7 +684,7 @@ def text_tool():
         return None
 
 
-def status(D, quiet=False):
+def status(D, quiet=False, report=True):
     cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
     pj, tj = os.path.join(D, "papers.json"), os.path.join(D, "topics.json")
     P = json.load(open(pj, encoding="utf-8"))["papers"] if os.path.exists(pj) else []
@@ -720,7 +720,8 @@ def status(D, quiet=False):
          f"{len(off)} judged outside the current syllabus)",
          f"  topics: {sum(srcs.values())} (" + ", ".join(f"{n} {k}" for k, n in srcs.items()) + ")",
          f"  forecast: {'FORECAST.md' if os.path.exists(os.path.join(D, 'FORECAST.md')) else 'not yet'}"]
-    L += ["  " + x for x in predict.materials_report(D)]
+    if report:                                          # prepare prints it once, before the forecast
+        L += ["  " + x for x in predict.materials_report(D)]
     todo = []
     if unread and not text_tool():
         todo.append(f"{len(unread)} PDFs could not be read: install poppler-utils (Linux: apt/dnf install poppler-utils; "
@@ -806,7 +807,7 @@ def main():
         print("\n".join(predict.materials_report(D)) + "\n")
         print("== 5/5 forecast")
         print(run("predict.py", D, *pargs).stdout[-2500:])
-        print("\n".join(status(D, quiet=True)))
+        print("\n".join(status(D, quiet=True, report=False)))
         print(f"\nRead {os.path.join(D, 'FORECAST.md')}")
     elif a.command == "status":
         status(subject_dir(a.subject))
@@ -818,8 +819,11 @@ def main():
         n, low = autotag(subject_dir(a.subject), retag=a.all)
         print(f"tagged {n} questions ({low} low-confidence)")
     elif a.command == "predict":
-        r = run("predict.py", subject_dir(a.subject), *pargs)
+        D = subject_dir(a.subject)
+        r = run("predict.py", D, *pargs)
         print(r.stdout)
+        import predict                                  # noqa: E402
+        print("\n".join(predict.materials_report(D)))
 
 
 if __name__ == "__main__":
