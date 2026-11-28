@@ -2,7 +2,7 @@
 name: ktu-exam-predictor
 description: Predict the important topics and likely questions for any KTU B.Tech exam from a course code or name (e.g. "PCCST502", "DAA", "machine learning", "microcontrollers"). One command downloads about 10 past papers (current course + older-scheme versions) and the ktunotes module notes, extracts and tags the questions, and writes a forecast checked against a real paper; then teach the result. Use this whenever the user mentions a KTU subject together with exams, PYQs or previous-year questions, important topics, "what will come", a study plan before an exam, a supplementary/supply exam, or exam prediction, even if they don't say "predict".
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # KTU exam predictor
