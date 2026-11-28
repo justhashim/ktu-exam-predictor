@@ -157,16 +157,64 @@ HEADING_SKIP = re.compile(r"(?i)^(about figure|explanation|model question|exampl
                           r"case|figure|fig\.|table|where|given|required|final|click|ktunotes|module|downloaded)")
 
 
+HEADING_STOP_END = {"by", "of", "the", "a", "an", "to", "and", "or", "in", "on", "with", "for", "not"}
+NUMBERED_HEADING = re.compile(r"^\s{0,6}(?:\d{1,2}(?:\.\d{1,2}){0,2}|[A-H])[.)]\s+(\S.*?)\s*$")
+
+
+def heading_ok(line, next_line=""):
+    """Whether a line reads as a section heading rather than a sentence, a fragment or a list item. A heading has 1
+    to 8 words, a capital first letter and balanced parentheses; it doesn't end with a comma, dash, colon or a word
+    like "by" or "the", and the next line doesn't carry on in lowercase ("Two connecting devices joined by one" /
+    "transmission medium."). A line of 5+ words that is mostly lowercase is a sentence ("The client opens a TCP
+    connection and sends"); shorter sentence-case headings ("Count to infinity problem") are kept."""
+    line = line.strip()
+    words = line.split()
+    if not (1 <= len(words) <= 8) or not line[0].isupper() or line.count("(") != line.count(")"):
+        return False
+    if line.endswith((",", "-", ":", ";")) or words[-1].lower().strip(".") in HEADING_STOP_END:
+        return False
+    if len(words) >= 5:
+        long_words = re.findall(r"[A-Za-z]{4,}", line)
+        if long_words and sum(w[0].islower() for w in long_words) > len(long_words) / 2:
+            return False
+    if next_line.strip()[:1].islower():
+        return False
+    return not safety.looks_like_injection(line) and not HEADING_SKIP.match(line)
+
+
 def heading(pg):
     """A short title line at the top of a notes page, or None."""
-    for l in [l.strip() for l in pg.splitlines() if l.strip()][:2]:
+    lines = [l.strip() for l in pg.splitlines() if l.strip()]
+    for i, l in enumerate(lines[:2]):
         if safety.looks_like_injection(l):
             continue
         if (3 <= len(l) <= 60 and len(l.split()) <= 8 and l[0].isupper() and not l.endswith((".", ":", ","))
                 and not HEADING_SKIP.match(l) and not re.search(r"[=↓→×]|\bfig\b", l, re.I)
-                and sum(c.isalpha() for c in l) >= 0.7 * len(l.replace(" ", "")) and "  " not in l):
+                and sum(c.isalpha() for c in l) >= 0.7 * len(l.replace(" ", "")) and "  " not in l
+                and heading_ok(l, lines[i + 1] if i + 1 < len(lines) else "")):
             return l
     return None
+
+
+def section_headings(pg):
+    """The section headings on a notes page, in page order: its top heading, plus numbered or lettered headings
+    anywhere on the page ("2. Block Coding", "A. Frequency-Division Multiplexing (FDM)", "3) Scrambling"), with the
+    numbering removed. Notes put many sections mid-page, where heading() never looks."""
+    lines = pg.splitlines()
+    out = [heading(pg)] if heading(pg) else []
+    for i, l in enumerate(lines):
+        m = NUMBERED_HEADING.match(l)
+        if not m:
+            continue
+        nxt = next((x for x in lines[i + 1:] if x.strip()), "")
+        if heading_ok(m.group(1), nxt):
+            out.append(m.group(1).strip())
+    seen, uniq = set(), []
+    for h in out:
+        if h.lower() not in seen:
+            seen.add(h.lower())
+            uniq.append(h)
+    return uniq
 
 
 # syllabus lines that point at a textbook or a list of hours, not at content
