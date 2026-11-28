@@ -158,7 +158,8 @@ HEADING_SKIP = re.compile(r"(?i)^(about figure|explanation|model question|exampl
 
 
 HEADING_STOP_END = {"by", "of", "the", "a", "an", "to", "and", "or", "in", "on", "with", "for", "not"}
-NUMBERED_HEADING = re.compile(r"^\s{0,6}(?:\d{1,2}(?:\.\d{1,2}){0,2}|[A-H])[.)]\s+(\S.*?)\s*$")
+NUMBERED_HEADING = re.compile(r"^\s{0,6}(?:(?:\d{1,2}(?:\.\d{1,2}){0,2}|[A-H])[.)]|\d{1,2}(?:\.\d{1,2}){1,2})\s+(\S.*?)\s*$")
+#                                 "2. x", "4.1) x", "A. x"                   "4.1 x", "11.2.3 x" (textbook style)
 
 
 def heading_ok(line, next_line=""):
@@ -321,7 +322,16 @@ def draft_topics(D, redo=False):
     OFF_SYLLABUS bucket. Notes pages are linked to topics for display and tagging."""
     tj = os.path.join(D, "topics.json")
     if os.path.exists(tj) and not redo:
-        return "kept existing topics.json"
+        # keep hand edits and split pieces; only add the covers list to topics that don't have one yet
+        TJ = json.load(open(tj, encoding="utf-8"))
+        page_text = {(f, i): pg for f, i, _, pg in notes_pages(D)}
+        filled = 0
+        for t in TJ.get("topics", {}).values():
+            if "covers" not in t and isinstance(t, dict):
+                t["covers"] = topic_covers(t, page_text)
+                filled += bool(t["covers"])
+        json.dump(TJ, open(tj, "w", encoding="utf-8"), indent=1, ensure_ascii=False)
+        return "kept existing topics.json" + (f" (added covers to {filled} topics)" if filled else "")
     cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
     pages = notes_pages(D)
     data = topics_page(cfg["code"])
