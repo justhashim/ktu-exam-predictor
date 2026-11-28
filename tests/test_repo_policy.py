@@ -11,7 +11,7 @@ import safety
 
 ROOT = U.ROOT
 AGENT_DOCS = ["SKILL.md", "references/lessons.md", "references/student.example.md"]   # loaded by the agent
-ALL_DOCS = AGENT_DOCS + ["README.md", "CONTRIBUTING.md"]
+ALL_DOCS = AGENT_DOCS + ["README.md", "CONTRIBUTING.md", "CHANGELOG.md"]
 DOC_HOSTS = {"img.shields.io", "www.python.org", "www.npmjs.com", "github.com", "ktunotes.live",
              "model.ktunotes.live", "topics.ktunotes.live", "pyq.ktunotes.live", "view.ktunotes.live"}
 GITHUB_REPO = "github.com/justhashim/ktu-exam-predictor"
@@ -105,6 +105,18 @@ class TestDocs(unittest.TestCase):
         self.assertIn("name: ktu-exam-predictor", m.group(1))
         desc = re.search(r"(?m)^description:\s*(.+)$", m.group(1)).group(1)
         self.assertLess(len(desc), 1024)
+
+    def test_skill_version_matches_the_changelog(self):
+        """SKILL.md's metadata.version is the newest release in CHANGELOG.md, so a copy of the skill says which
+        version it is. Bump both in the release pull request."""
+        front = re.match(r"---\n(.*?)\n---\n", read("SKILL.md"), re.S).group(1)
+        m = re.search(r'(?m)^metadata:\n(?:[ \t]+.*\n)*?[ \t]+version:\s*"?(\d+\.\d+\.\d+)"?\s*$', front + "\n")
+        self.assertTrue(m, "SKILL.md frontmatter needs metadata: version: X.Y.Z")
+        changelog = read("CHANGELOG.md") or ""
+        released = re.findall(r"(?m)^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}$", changelog)
+        self.assertTrue(released, "CHANGELOG.md needs '## [X.Y.Z] - YYYY-MM-DD' release headings")
+        self.assertEqual(m.group(1), released[0], "SKILL.md version must equal the newest CHANGELOG.md release")
+        self.assertIn(f"[{released[0]}]: https://{GITHUB_REPO}/", changelog, "each release links to its diff")
 
     def test_skill_mentions_only_existing_scripts(self):
         for name in set(re.findall(r"\$S/([A-Za-z_]+\.py)", read("SKILL.md"))):
