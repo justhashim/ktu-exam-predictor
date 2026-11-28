@@ -7,6 +7,19 @@ All notable changes to the KTU exam predictor skill. The format follows Keep a C
 
 When you release, bump `metadata.version` in `SKILL.md` to match the newest heading here; a test checks the two agree.
 
+## [Unreleased]
+
+### Added
+- **Topic families.** Parts of one topic are ranked as one family, by the chance any of them is asked, and sit together in the study order. A family comes from a `family` field in `topics.json`, a split topic's parent, or 2 to 6 topics in a module sharing a "Name:" prefix (not generic ones like "Module 1:"). `"family_order": false` in `subject.json` turns it off.
+- **Part B depth line** in `FORECAST.md` and `results.json` (`part_b_depth`): per module, how many of its top topics past papers needed to answer one Part B question in full.
+- **Covers lists.** Each topic lists the notes sections it covers (`covers` in `topics.json`, a Covers column in `FORECAST.md`), from page-top and numbered mid-page headings: "Digital line coding" shows Block Coding, Scrambling, PCM.
+
+### Changed
+- A topic with no notes pages of its own takes the pages it covers as its study size.
+
+### Fixed
+- Sentence fragments at the top of a notes page ("Two connecting devices joined by one") no longer become topics.
+
 ## [1.2.0] - 2026-11-28
 
 Two past papers were "left out, could not read" for a user until they tinkered with them. This release makes the skill retry what failed, read what the OCR lost, and say what it found, read and used before it shows the forecast.
