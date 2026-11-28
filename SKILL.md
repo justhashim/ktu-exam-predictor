@@ -78,11 +78,12 @@ Old-scheme course codes (e.g. CST306) work too, with the 2019 pattern of 10 × 3
 **Your first message after `prepare` opens with the materials report**, before any topic, plan or question. Take the numbers from `== MATERIALS REPORT` (also at the top of `FORECAST.md` and in `status`). Its parts, in this order:
 1. **Past papers:** how many were available, how many were selected, how many downloaded (and how many of those needed a retry), and how many were read as text or as scans.
 2. **Used in the forecast:** how many papers, and how many questions.
-3. **Not used:** each paper by name, with its reason (download failed, unreadable, scan not transcribed yet, duplicate, garbled).
-4. **Notes:** how many PDFs were found, downloaded and read as text, how many are scans, and any that failed.
-5. **Syllabus and model paper:** found or not, and read or not.
-6. **Retries:** each file on the report's `Needed more than one try` line, by name, with its number of tries (skip this part when the line is absent).
-7. **Gaps:** what you will do about anything still missing.
+3. **Read with gaps:** each paper on the report's `Read with gaps` list, by name, with the questions it is missing (skip this part when the list is absent).
+4. **Not used:** each paper by name, with its reason (download failed, unreadable, scan not transcribed yet, duplicate, garbled).
+5. **Notes:** how many PDFs were found, downloaded and read as text, how many are scans, and any that failed.
+6. **Syllabus and model paper:** found or not, and read or not.
+7. **Retries:** each file on the report's `Needed more than one try` line, by name, with its number of tries (skip this part when the line is absent).
+8. **Gaps:** what you will do about anything still missing.
 
 Then go on to the forecast:
 
@@ -129,7 +130,8 @@ That is four papers, so it's a rough guide. The fixes below still help, most of 
    - read `pyq/img/*.jpg` (model paper: `model/img/`) or the PDF
    - write `questions[]` in `papers.json`: `{"q": "A1"|"B11a", "marks": 3, "topics": [], "text": "..."}`
    - run `python3 $S/ktu.py autotag "<course>"`
-2. **Papers that failed the marks check** (`pyq/EXTRACTION.md`):
+2. **Papers that failed the marks check** (`pyq/EXTRACTION.md`), and every paper on the report's `Read with gaps` list:
+   - Most ktunotes papers are scans with an OCR text layer, which can drop question numbers, words or a Part B heading. Every paper's pages are in `pyq/img/`: read the missing or misnumbered questions from there.
    - correct them in `papers.json`
    - validate with `python3 $S/extract_questions.py <subject dir> --check`
    - The check uses the KTU pattern. 2019 scheme: 10 × 3 marks, plus 14-mark Part B questions. 2024 scheme: 8 × 3 marks, plus 9-mark questions.

@@ -136,6 +136,22 @@ class TestFetchPdf(unittest.TestCase):
         self.assertTrue(st.startswith("UNREADABLE"), st)
         self.assertNotIn("no text tool", st)
 
+    def test_question_papers_always_get_page_images(self):
+        """ktunotes papers are scans with an OCR text layer: enough text to pass as a text PDF, but the OCR drops
+        question numbers and words. Papers are rendered even when they have text, so the questions can be read."""
+        path = os.path.join(self.d, "ocr.pdf")
+        open(path, "wb").write(GOOD_PDF)
+        runs = []
+        with mock.patch.object(fetch, "pdf_text", side_effect=fake_pdf_text), \
+                mock.patch.object(fetch.shutil, "which", return_value="/usr/bin/tool"), \
+                mock.patch.object(fetch.subprocess, "run", side_effect=lambda cmd, **k: runs.append(cmd[0])):
+            st = fetch.to_text(path, os.path.join(self.d, "img"), min_total=3000, pages=True)
+            notes = fetch.to_text(path, os.path.join(self.d, "img"))
+        self.assertTrue(st.startswith("text"), st)
+        self.assertIn("pages in", st)
+        self.assertEqual(runs, ["pdftoppm"], "rendered for the paper, not for text notes")
+        self.assertNotIn("pages in", notes)
+
     def test_a_scan_is_not_downloaded_again(self):
         n = []
 
@@ -214,6 +230,17 @@ class TestSetupManifest(unittest.TestCase):
         self.assertIn("plus 1 kept from an earlier run (OLD Problems.pdf)", rep)
         self.assertIn("3 used for topics and ranking", rep)
 
+    def test_scanned_notes_are_not_counted_as_used(self):
+        nd = os.path.join(self.D, "notes")
+        open(os.path.join(nd, "SCAN M3.pdf"), "wb").write(GOOD_PDF)
+        open(os.path.join(nd, "SCAN M3.txt"), "w").write("\f".join(["Downloaded from KTUNOTES.LIVE"] * 30))
+        try:
+            rep = "\n".join(predict.materials_report(self.D))
+        finally:
+            os.remove(os.path.join(nd, "SCAN M3.pdf"))
+            os.remove(os.path.join(nd, "SCAN M3.txt"))
+        self.assertIn("2 used for topics and ranking", rep)
+
     def test_report_works_without_a_manifest(self):
         D = U.new_subject("nomanifest", papers=[("P0", U.paper_text())])
         rep = "\n".join(predict.materials_report(D))
@@ -234,10 +261,31 @@ class TestUsedInForecast(unittest.TestCase):
             {"id": "E", "label": "May 2023", "course": "PCXXT501", "type": "regular", "source": "pyq/E.pdf",
              "questions": good[:3], "extract_status": "review: 3 questions"},
             {"id": "MODEL_PCXXT501", "label": "Model paper", "course": "PCXXT501", "type": "regular", "model": True,
-             "questions": good[:5], "source": "model/PCXXT501_model.pdf"}]}
+             "questions": good[:5], "source": "model/PCXXT501_model.pdf"},
+            {"id": "F", "label": "Jun 2024", "course": "PCXXT501", "type": "regular", "source": "pyq/F.pdf",
+             "questions": good[:6] + good[8:13] + good[14:], "extract_status": "review: Part A has 6 items"},
+            {"id": "G", "label": "Nov 2025", "course": "PCXXT501", "type": "regular", "source": "pyq/G.pdf",
+             "questions": [], "extract_status": "review: PART A/PART B headings not found"},
+            {"id": "H", "label": "Aug 2024", "course": "PCXXT501", "type": "regular", "source": "pyq/H.pdf",
+             "extract_status": "review: Part B heading lost", "questions": good[:8] + good[8:10] +
+             [{"q": "B7a", "marks": 5, "topics": ["T"], "text": "x"}, {"q": "B7b", "marks": 4, "topics": ["T"], "text": "y"}]}]}
         json.dump(P, open(os.path.join(D, "papers.json"), "w"))
         os.makedirs(os.path.join(D, "pyq", "img"), exist_ok=True)
         open(os.path.join(D, "pyq", "img", "B-1.jpg"), "wb").write(b"jpg")
+        for x in ("F", "G"):                            # OCR'd scans: plenty of text, and page images
+            open(os.path.join(D, "pyq", x + ".txt"), "w").write("garbled ocr text " * 400)
+            open(os.path.join(D, "pyq", "img", x + "-1.jpg"), "wb").write(b"jpg")
+        rep = "\n".join(predict.materials_report(D))
+        self.assertIn("Used in the forecast: 3 papers (41 questions)", rep)
+        self.assertIn("Aug 2024: 10 of 16 questions; missing B11, B12, B13, B14, B15, B16; "
+                      "drafted under numbers this paper doesn't have: B7 (read them from pyq/img/)", rep)
+        self.assertIn("Read with gaps", rep)
+        self.assertIn("Jun 2024: 13 of 16 questions; missing A7, A8, B14 (read them from pyq/img/)", rep)
+        self.assertIn("Nov 2025: no questions found in its text (likely a scan with poor OCR: read it from pyq/img/)", rep)
+        self.assertIn("read the missing questions from pyq/img/", rep)
+        self.assertNotIn("Nov 2021: ", rep.split("Read with gaps")[1], "a complete paper has no gaps")
+        P["papers"] = [p for p in P["papers"] if p["id"] not in ("F", "G", "H")]
+        json.dump(P, open(os.path.join(D, "papers.json"), "w"))
         rep = "\n".join(predict.materials_report(D))
         self.assertIn("Used in the forecast: 1 paper (16 questions)", rep)
         self.assertIn("Nov 2022: no questions yet (scan: transcribe it from pyq/img/)", rep)

@@ -286,7 +286,7 @@ def cmd_model(code, D):
     os.makedirs(md, exist_ok=True)
     pdf = safety.safe_join(md, f"{code.upper()}_model.pdf")
     if not fetch_pdf(pdf, lambda q: download_drive(ids[0], q), "model", "Model paper", os.path.join(md, "img"),
-                     min_total=3000)["downloaded"]:
+                     min_total=3000, pages=True)["downloaded"]:
         return False                                      # it exists, but every download failed
     return pdf
 
@@ -350,7 +350,17 @@ def pdf_text(pdf, txt):
 UNREADABLE = "UNREADABLE (damaged or cut-off PDF)"
 
 
-def to_text(pdf, imgdir=None, min_total=0):
+def render_pages(pdf, imgdir):
+    os.makedirs(imgdir, exist_ok=True)
+    base = os.path.join(imgdir, os.path.basename(pdf)[:-4])
+    subprocess.run(["pdftoppm", "-r", "90", "-jpeg", pdf, base], capture_output=True, check=False)   # jpeg: ~9x faster
+
+
+def to_text(pdf, imgdir=None, min_total=0, pages=False):
+    """PDF -> .txt next to it, and a status line. A PDF with little text is a scan: its pages are rendered to imgdir.
+    pages=True renders a question paper's pages even when it has text. ktunotes papers are scans with an OCR text
+    layer that passes as text, but the OCR can drop question numbers and words (a watermark or a college stamp
+    over the page), and the page images are the only way to read what it lost."""
     txt = pdf[:-4] + ".txt"
     got = pdf_text(pdf, txt)
     if got == "no tool":
@@ -358,14 +368,15 @@ def to_text(pdf, imgdir=None, min_total=0):
     if got != "ok":
         return UNREADABLE
     n = os.path.getsize(txt) if os.path.exists(txt) else 0
-    pages = max(1, open(txt, errors="replace", encoding="utf-8").read().count("\f")) if n else 1
-    if (n / pages < 300 or n < min_total) and imgdir:   # little text per page = scanned: render pages to read as images
-        os.makedirs(imgdir, exist_ok=True)
-        base = os.path.join(imgdir, os.path.basename(pdf)[:-4])
+    npages = max(1, open(txt, errors="replace", encoding="utf-8").read().count("\f")) if n else 1
+    if (n / npages < 300 or n < min_total) and imgdir:   # little text per page = scanned: render pages to read as images
         if not shutil.which("pdftoppm"):
             return "scanned (read the PDF pages directly; pdftoppm not installed)"
-        subprocess.run(["pdftoppm", "-r", "90", "-jpeg", pdf, base], check=False)   # jpeg: ~9x faster than png for scans
+        render_pages(pdf, imgdir)
         return "scanned -> " + imgdir
+    if pages and imgdir and shutil.which("pdftoppm"):
+        render_pages(pdf, imgdir)
+        return f"text {n} B (pages in {os.path.basename(imgdir.rstrip(os.sep))}/ to check the text against)"
     return f"text {n} B"
 
 
@@ -380,7 +391,7 @@ def read_kind(st):
     return "text" if st else "not downloaded"
 
 
-def fetch_pdf(path, download, kind, name, imgdir=None, min_total=0, **extra):
+def fetch_pdf(path, download, kind, name, imgdir=None, min_total=0, pages=False, **extra):
     """Download `path` (unless it is already there) and read it, with up to TRIES downloads: a failed download, or
     a file that can't be read because it is damaged or cut off, is downloaded again. A file left damaged by an
     earlier run is replaced. `download(path)` returns True once it saved the file (None: nothing to download).
@@ -396,7 +407,7 @@ def fetch_pdf(path, download, kind, name, imgdir=None, min_total=0, **extra):
             if not download(path):
                 err = ERRORS.pop(path, "") or "download failed"
                 continue
-        st = to_text(path, imgdir, min_total)
+        st = to_text(path, imgdir, min_total, pages)
         if st != UNREADABLE:
             err = ""
             break
@@ -548,7 +559,7 @@ def cmd_pyqs(D, codes):
         path = os.path.join(out, name)
         print("->", name)
         rec = fetch_pdf(path, (lambda q, f=fid: download_drive(f, q)) if fid else (lambda q, u=url: _dl(u, q)),
-                        "paper", name, os.path.join(out, "img"))
+                        "paper", name, os.path.join(out, "img"), pages=True)
         print("  ", tries_note(rec))
 
 
@@ -789,7 +800,7 @@ def ingest_user_files(D, code):
                 shutil.copy(files[0], dst)
             src_rel = "pyq/" + os.path.basename(dst)
             st = tries_note(fetch_pdf(dst, None, "own paper", safety.scrub(stem), os.path.join(D, "pyq", "img"),
-                                      min_total=3000, source=src_rel))
+                                      min_total=3000, pages=True, source=src_rel))
         else:
             os.makedirs(os.path.join(D, "pyq", "img"), exist_ok=True)
             for i, f in enumerate(files, 1):
@@ -843,7 +854,7 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=(), s
     def get_paper(r):
         path = safety.safe_join(pq, r["file"])
         rec = fetch_pdf(path, (lambda q: download_drive(r["id"], q)) if r["id"] else (lambda q: _dl(r["url"], q)),
-                        "paper", r["label"], os.path.join(pq, "img"), min_total=3000, course=r["code"],
+                        "paper", r["label"], os.path.join(pq, "img"), min_total=3000, pages=True, course=r["code"],
                         source="pyq/" + r["file"])
         return tries_note(rec)
     with ThreadPoolExecutor(WORKERS) as ex:       # file names are distinct (one per code/year/month)
