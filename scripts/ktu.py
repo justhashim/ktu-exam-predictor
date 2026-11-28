@@ -196,6 +196,27 @@ def heading(pg):
     return None
 
 
+COVERS_MAX = 12
+
+
+def topic_covers(t, page_text):
+    """The notes sections a topic covers: the section headings on its notes pages (notes_src and notes_see_src,
+    [[file, first, last], ...]), in page order, without its own name or repeats, at most COVERS_MAX. page_text maps
+    (file, page) to the page's text; pages missing from it (scans, no text) add nothing."""
+    out, seen = [], {t.get("name", "").lower()}
+    for f, a, b in t.get("notes_src", []) + t.get("notes_see_src", []):
+        for i in range(a, b + 1):
+            for h in section_headings(page_text.get((f, i), "")):
+                h = safety.scrub(h)
+                if h == safety.WITHHELD or h.lower() in seen or fetch.name_sim(h, t.get("name", "")) >= 0.5:
+                    continue
+                seen.add(h.lower())
+                out.append(h)
+                if len(out) == COVERS_MAX:
+                    return out
+    return out
+
+
 def section_headings(pg):
     """The section headings on a notes page, in page order: its top heading, plus numbered or lettered headings
     anywhere on the page ("2. Block Coding", "A. Frequency-Division Multiplexing (FDM)", "3) Scrambling"), with the
@@ -393,6 +414,9 @@ def draft_topics(D, redo=False):
                 t[field] = [f"M{t['module']}:{a}-{b}" if a != b else f"M{t['module']}:{a}" for _, a, b in rr]
             if rr:
                 t[field + "_src"] = rr      # [notes file, first page, last page]
+    page_text = {(f, i): pg for f, i, _, pg in pages}
+    for t in topics.values():      # what each topic covers, so "Line coding" shows Block coding, Scrambling, PCM
+        t["covers"] = topic_covers(t, page_text)
     # 3a) the syllabus against the topics so far: items no topic covers become topics (the ktunotes list and the
     #     notes can both miss syllabus content); matched items join their topic's text, which sharpens tagging.
     if topics:
