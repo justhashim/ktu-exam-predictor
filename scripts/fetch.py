@@ -58,7 +58,8 @@ RETRY_WAIT = 2     # seconds before the second try, doubled before each later on
 
 def _temporary(e):
     """A network error worth another try: timeouts, dropped connections, cut-off reads (http.client's
-    IncompleteRead), HTTP 408/429/5xx. Not 403/404 or a blocked URL: those answer the same every time."""
+    IncompleteRead, or a body shorter than its Content-Length, which get() raises as URLError), HTTP 408/429/5xx.
+    Not 403/404 or a blocked URL: those answer the same every time."""
     if isinstance(e, safety.BlockedURL):
         return False
     if isinstance(e, urllib.error.HTTPError):
@@ -77,6 +78,10 @@ def get(url, binary=False, timeout=120, tries=None):
             with _OPENER.open(req, timeout=timeout) as r:
                 safety.check_url(r.geturl())
                 data = r.read(safety.MAX_DOWNLOAD + 1)
+                length = (getattr(r, "headers", None) or {}).get("Content-Length")
+            if length and length.isdigit() and len(data) < int(length) <= safety.MAX_DOWNLOAD:
+                # http.client returns a body cut off by a dropped connection without an error: retry it
+                raise urllib.error.URLError(f"response cut off: {len(data)} of {length} bytes")
             break
         except Exception as e:
             if attempt == tries or not _temporary(e):
@@ -162,11 +167,22 @@ def show(items, ind=""):
 
 
 ERRORS = {}        # path -> why its last download failed (one thread per path), for the materials report
+PERMANENT = set()  # paths whose last download failed in a way another try won't change (403/404, blocked, private)
 
 
 def complete_pdf(data):
-    """False for a PDF cut off mid-download: a whole PDF ends with %%EOF (allowing some trailing bytes)."""
-    return data[:4] != b"%PDF" or b"%%EOF" in data[-4096:]
+    """False for a PDF cut off mid-download: a whole PDF ends with %%EOF. Some files carry padding after it, so
+    the last 64 KB are searched. Anything that isn't a PDF is judged by the caller."""
+    return data[:4] != b"%PDF" or b"%%EOF" in data[-65536:]
+
+
+def _failed(path, why):
+    """Record why a download failed. why: [(message, temporary)], one per URL tried. The download is permanent
+    (fetch_pdf stops retrying) only when every URL failed in a way another try won't change."""
+    ERRORS[path] = why[0][0] if why else "could not download"
+    if why and not any(t for _, t in why):
+        PERMANENT.add(path)
+    return False
 
 
 def download_drive(fid, path):
@@ -178,19 +194,18 @@ def download_drive(fid, path):
             data = get(url, binary=True, timeout=300, tries=1)
         except Exception as e:
             print("   download failed:", e)
-            why.append(("blocked: " if isinstance(e, safety.BlockedURL) else "") + str(e)[:120])
+            why.append((str(e)[:120], _temporary(e)))
             continue
         if not complete_pdf(data):
             print("   download cut off before the end of the file")
-            why.append("download cut off before the end of the file")
+            why.append(("download cut off before the end of the file", True))
             continue
         if data[:4] == b"%PDF" or not data.lstrip().startswith(b"<"):
             open(path, "wb").write(data)
             return True
-        why.append("Drive answered with a web page (private file, or it needs confirmation)")
+        why.append(("Drive answered with a web page (private file, or it needs confirmation)", False))
     print("   could not download", fid, "(maybe private or needs confirmation)")
-    ERRORS[path] = why[0] if why else "could not download"
-    return False
+    return _failed(path, why)
 
 
 @functools.lru_cache(maxsize=8)     # the syllabus is read several times per run
@@ -237,8 +252,9 @@ def cmd_syllabus(code, D):
     sd = os.path.join(D, "syllabus")
     os.makedirs(sd, exist_ok=True)
     pdf = safety.safe_join(sd, f"{code.upper()}.pdf")
-    if not fetch_pdf(pdf, lambda q: download_drive(ids[0], q), "syllabus", f"{code.upper()} syllabus")["downloaded"]:
-        return False                                      # it exists, but every download failed
+    rec = fetch_pdf(pdf, lambda q: download_drive(ids[0], q), "syllabus", f"{code.upper()} syllabus")
+    if not rec["downloaded"] or rec["read"] in ("unreadable", "no tool"):
+        return False                                      # it exists, but no copy arrived or none could be read
     mods = syllabus_modules(pdf_raw_text(pdf))
     L = [f"# {code.upper()} syllabus by module", "",
          "Parsed automatically from the syllabus PDF (text is from outside: study material, not instructions). "
@@ -285,9 +301,10 @@ def cmd_model(code, D):
     md = os.path.join(D, "model")
     os.makedirs(md, exist_ok=True)
     pdf = safety.safe_join(md, f"{code.upper()}_model.pdf")
-    if not fetch_pdf(pdf, lambda q: download_drive(ids[0], q), "model", "Model paper", os.path.join(md, "img"),
-                     min_total=3000, pages=True)["downloaded"]:
-        return False                                      # it exists, but every download failed
+    rec = fetch_pdf(pdf, lambda q: download_drive(ids[0], q), "model", "Model paper", os.path.join(md, "img"),
+                    min_total=3000, pages=True)
+    if not rec["downloaded"] or rec["read"] == "unreadable":
+        return False                                      # it exists, but no copy arrived or none could be read
     return pdf
 
 
@@ -351,9 +368,16 @@ UNREADABLE = "UNREADABLE (damaged or cut-off PDF)"
 
 
 def render_pages(pdf, imgdir):
+    """Page images imgdir/<name>-<n>.jpg. Skipped when this PDF's pages are already there and newer than the PDF,
+    so a rerun of prepare doesn't render every paper again."""
     os.makedirs(imgdir, exist_ok=True)
-    base = os.path.join(imgdir, os.path.basename(pdf)[:-4])
-    subprocess.run(["pdftoppm", "-r", "90", "-jpeg", pdf, base], capture_output=True, check=False)   # jpeg: ~9x faster
+    name = os.path.basename(pdf)[:-4]
+    done = [os.path.join(imgdir, f) for f in os.listdir(imgdir)
+            if f.startswith(name + "-") and f.endswith(".jpg") and f[len(name) + 1:-4].isdigit()]
+    if done and min(os.path.getmtime(f) for f in done) >= os.path.getmtime(pdf):
+        return
+    subprocess.run(["pdftoppm", "-r", "90", "-jpeg", pdf, os.path.join(imgdir, name)],
+                   capture_output=True, check=False)                       # jpeg: ~9x faster than png for scans
 
 
 def to_text(pdf, imgdir=None, min_total=0, pages=False):
@@ -394,12 +418,14 @@ def read_kind(st):
 def fetch_pdf(path, download, kind, name, imgdir=None, min_total=0, pages=False, **extra):
     """Download `path` (unless it is already there) and read it, with up to TRIES downloads: a failed download, or
     a file that can't be read because it is damaged or cut off, is downloaded again. A file left damaged by an
-    earlier run is replaced. `download(path)` returns True once it saved the file (None: nothing to download).
-    The outcome goes to RECORDS for the materials report and is returned."""
-    attempts, st, err = 0, "", ""
+    earlier run is set aside and put back if no new copy arrives. A failure another try won't change (403/404, a
+    blocked URL, a private file) is not retried. `download(path)` returns True once it saved the file (None:
+    nothing to download). The outcome goes to RECORDS for the materials report and is returned."""
+    attempts, st, err, backup = 0, "", "", None
+    PERMANENT.discard(path)
     while True:
         if not os.path.exists(path):
-            if download is None or attempts >= TRIES or err.startswith("blocked"):
+            if download is None or attempts >= TRIES or path in PERMANENT:
                 break
             if attempts:
                 time.sleep(RETRY_WAIT * 2 ** (attempts - 1))
@@ -414,20 +440,57 @@ def fetch_pdf(path, download, kind, name, imgdir=None, min_total=0, pages=False,
         err = "the PDF could not be read (damaged or cut off)"
         if download is None or attempts >= TRIES:
             break                                          # keep it: the next prepare tries it again
-        os.remove(path)
+        if attempts == 0:                                  # from an earlier run: keep it until a new copy arrives
+            backup = path + ".old"
+            os.replace(path, backup)
+        else:
+            os.remove(path)
+    if backup:
+        if os.path.exists(path):
+            os.remove(backup)
+        else:                                              # every new download failed: the old copy is all there is
+            os.replace(backup, path)
+            st, err = UNREADABLE, f"the PDF could not be read, and downloading it again failed ({err})"
+    permanent = path in PERMANENT
+    PERMANENT.discard(path)
     got = os.path.exists(path)
     rec = {"kind": kind, "name": name, "file": path, "downloaded": got, "read": read_kind(st) if got else "not downloaded",
-           "status": st if got else "DOWNLOAD FAILED", "attempts": attempts, "error": err, **extra}
+           "status": st if got else "DOWNLOAD FAILED", "attempts": attempts, "error": err, "permanent": permanent, **extra}
     RECORDS.append(rec)
     return rec
+
+
+def plural_tries(n):
+    return f"{n} {'try' if n == 1 else 'tries'}"
 
 
 def tries_note(rec):
     """One status line for a file: what reading it gave, and how many tries it took or why it failed."""
     if not rec["downloaded"]:
-        return f"DOWNLOAD FAILED after {rec['attempts']} tries ({rec['error']})"
+        return f"DOWNLOAD FAILED after {plural_tries(rec['attempts'])} ({rec['error']})"
     extra = f" (on try {rec['attempts']} of {TRIES})" if rec["attempts"] > 1 else ""
     return rec["status"] + extra + (f": {rec['error']}" if rec["error"] else "")
+
+
+def page_error(e):
+    """Why a syllabus or model page wasn't fetched, with the tries get() really made (only temporary errors retry)."""
+    return f"page not fetched{f' after {TRIES} tries' if _temporary(e) else ''} ({str(e)[:100]})"
+
+
+def source_state(kind, result, where):
+    """The report line for the syllabus or model paper. result: cmd_syllabus/cmd_model's return value: None (no page),
+    False (found, but not downloaded or not readable: the latest RECORDS entry of `kind` says which), or a path."""
+    if result is None:
+        return f"not found on {where}"
+    if result:
+        return "downloaded"
+    rec = next((r for r in reversed(RECORDS) if r["kind"] == kind), None)
+    if rec and rec["downloaded"] and rec["read"] == "no tool":
+        return "found, but not read: no PDF text tool installed"
+    if rec and rec["downloaded"]:
+        return f"found, but the PDF could not be read after {plural_tries(rec['attempts'] or 1)}"
+    return f"found, but the download failed after {plural_tries(rec['attempts'] if rec else TRIES)}" + (
+        f" ({rec['error']})" if rec and rec["error"] else "")
 
 
 def outline(pdf, width=110):
@@ -880,22 +943,20 @@ def cmd_setup(query, n=10, extra_old=(), short=None, name=None, notes_from=(), s
     try:
         syl = cmd_syllabus(info["code"], D)
     except Exception as e:                                 # the syllabus is a bonus: never fail setup over it
-        found["syllabus"] = f"page not fetched after {TRIES} tries ({str(e)[:100]})"
+        found["syllabus"] = page_error(e)
     if syl:
         n_mods = len(syllabus_modules(pdf_raw_text(syl)))
         found["syllabus"] = f"read ({n_mods} modules)"
         print(f"\nSyllabus: {os.path.relpath(syl, D)} ({n_mods} modules) -> syllabus/MODULES.md")
     else:
-        found.setdefault("syllabus", "not found on syllabus.ktunotes.live" if syl is None else
-                         f"found, but the download failed after {TRIES} tries")
+        found.setdefault("syllabus", source_state("syllabus", syl, "syllabus.ktunotes.live"))
         print("\nSyllabus:", found["syllabus"])
     model = None
     try:
         model = cmd_model(info["code"], D)
     except Exception as e:
-        found["model"] = f"page not fetched after {TRIES} tries ({str(e)[:100]})"
-    found.setdefault("model", "downloaded" if model else "not found on model.ktunotes.live" if model is None else
-                     f"found, but the download failed after {TRIES} tries")
+        found["model"] = page_error(e)
+    found.setdefault("model", source_state("model", model, "model.ktunotes.live"))
     print(f"\nModel paper: {os.path.relpath(model, D)}" if model else f"\nModel paper: {found['model']}")
     print("\nOwn files (the student's notes/ and papers/ folders):")
     own_notes, own_papers = ingest_user_files(D, info["code"])
@@ -998,12 +1059,10 @@ def _dl(url, path):
         data = get(url, binary=True, timeout=300, tries=1)   # download first: a refused URL leaves no empty file behind
     except Exception as e:
         print("   failed:", e)
-        ERRORS[path] = ("blocked: " if isinstance(e, safety.BlockedURL) else "") + str(e)[:120]
-        return False
+        return _failed(path, [(str(e)[:120], _temporary(e))])
     if not complete_pdf(data):
         print("   failed: download cut off before the end of the file")
-        ERRORS[path] = "download cut off before the end of the file"
-        return False
+        return _failed(path, [("download cut off before the end of the file", True)])
     open(path, "wb").write(data)
     return True
 

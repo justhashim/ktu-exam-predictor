@@ -148,6 +148,9 @@ def materials_report(D):
     def n(k, word):
         return f"{k} {word}" + ("" if k == 1 else "s")
 
+    def t(k):
+        return f"{k} {'try' if k == 1 else 'tries'}"
+
     L, missed, fixes = [f"Materials report (each download is tried up to {tries} times):"], [], []
     if man:
         paper_recs = [r for r in recs if r["kind"] == "paper"]
@@ -158,13 +161,14 @@ def materials_report(D):
         L.append(f"- Past papers: {man.get('selected_papers', len(paper_recs))} selected of "
                  f"{man.get('available_papers', '?')} available; {len(got)} downloaded"
                  + (f" ({len(retried)} after a retry)" if retried else "")
-                 + (f"; {len(failed)} failed after {tries} tries" if failed else "")
+                 + (f"; {len(failed)} failed" + (f" after {tries} tries" if all(r["attempts"] == tries for r in failed)
+                                                 else "") if failed else "")
                  + f"; read: {reads['text']} with text, {n(reads['scan'], 'scan')} (images only)"
                  + (f", {reads['unreadable']} unreadable" if reads["unreadable"] else "")
                  + (f", {reads['no tool']} not read (no PDF text tool)" if reads["no tool"] else ""))
         for r in failed:
             missed.append(f"{r['name']}{course_tag(r['name'], r.get('course'))}: "
-                          f"download failed after {r['attempts']} tries ({r['error']})")
+                          f"download failed after {t(r['attempts'])} ({r['error']})")
     else:
         L.append(f"- Past papers: {sum(1 for p in P if not p.get('model'))} in papers.json "
                  "(no download record: `ktu.py prepare` writes one)")
@@ -209,7 +213,7 @@ def materials_report(D):
         elif p.get("questions"):
             why = "drafted questions look garbled (fix them in papers.json)"
         elif r.get("read") == "unreadable":
-            why = f"could not be read after {r.get('attempts', tries)} tries (damaged or cut-off PDF)"
+            why = f"could not be read after {t(r.get('attempts') or 1)} (damaged or cut-off PDF)"
         elif r.get("read") == "no tool":
             why = "not read: no PDF text tool installed"
         elif scan:
@@ -255,9 +259,9 @@ def materials_report(D):
                  + (f"; {n(len(scans), 'scan')} (not used until read from notes/img/)" if scans else ""))
         for r in nr:
             if not r["downloaded"]:
-                L.append(f"  - not used: {r['name']}: download failed after {r['attempts']} tries ({r['error']})")
+                L.append(f"  - not used: {r['name']}: download failed after {t(r['attempts'])} ({r['error']})")
             elif r["read"] in ("unreadable", "no tool"):
-                L.append(f"  - not used: {r['name']}: " + (f"could not be read after {r['attempts']} tries"
+                L.append(f"  - not used: {r['name']}: " + (f"could not be read after {t(r['attempts'] or 1)}"
                                                            if r["read"] == "unreadable" else "no PDF text tool installed"))
     else:
         L.append(f"- Notes: {len(on_disk)} PDFs, {len(with_text)} with text")
@@ -270,9 +274,9 @@ def materials_report(D):
                  f"{n(sum(1 for r in own if r['kind'] == 'own paper'), 'paper')}")
     slow = [r for r in recs if r["downloaded"] and r["attempts"] > 1]
     if slow:
-        L.append("- Needed more than one try: " + ", ".join(f"{r['name']} ({r['attempts']} tries)" for r in slow))
-    if any(not r["downloaded"] or r["read"] == "unreadable" for r in recs) or \
-            any("failed" in str((man or {}).get(k, "")) for k in ("syllabus", "model")):
+        L.append("- Needed more than one try: " + ", ".join(f"{r['name']} ({t(r['attempts'])})" for r in slow))
+    if any((not r["downloaded"] and not r.get("permanent")) or r["read"] == "unreadable" for r in recs) or \
+            any(w in str((man or {}).get(k, "")) for k in ("syllabus", "model") for w in ("tries", "could not be read")):
         fixes.append("rerun prepare: it tries the failed and damaged files again and keeps everything already read")
     if any("pyq/img/" in m for m in missed) or (model and not model[0].get("questions")):
         fixes.append("transcribe the scanned papers (step 3) so they count")
@@ -828,8 +832,7 @@ def report(o):
     print(f"{o['subject'].get('name')} ({o['subject'].get('code')}): {o['n_questions']} questions, "
           f"{len(o['papers'])} papers, {o['n_families']} question families")
     if o.get("materials"):
-        print(materials_line(o["materials"]))
-    print("\n".join(o.get("materials_report", [])))
+        print(materials_line(o["materials"]))           # the full report: FORECAST.md, and ktu.py prepare / predict
     for r in o["behaviour"]["per_paper"]:
         print(f"  {r['paper']:9s} {r['course']:9s} ({r['type'][:4]})  {r['repeats']:2d}/{r['questions']} reused ({r['rate']:.0%})")
     if o["backtest"]:

@@ -320,5 +320,132 @@ class TestReportBeforeForecast(unittest.TestCase):
         self.assertIn("Used in the forecast:", out)
 
 
+class TestReviewFixes(unittest.TestCase):
+    """Fixes for the code review of the retry / materials-report branch (findings 1-8)."""
+
+    def setUp(self):
+        self.d = os.path.join(U.TMP, "review", self._testMethodName)
+        os.makedirs(self.d, exist_ok=True)
+        fetch.RECORDS.clear()
+
+    # 1. an unreadable file from an earlier run is not lost when every re-download fails
+    def test_damaged_file_is_kept_when_redownloads_fail(self):
+        path = os.path.join(self.d, "old.pdf")
+        open(path, "wb").write(CUT_PDF)
+        e500 = urllib.error.HTTPError("https://drive.google.com/x", 500, "Server Error", {}, None)
+        with mock.patch.object(fetch, "pdf_text", side_effect=fake_pdf_text), \
+                mock.patch.object(fetch, "get", side_effect=e500):
+            rec, _ = quiet(fetch.fetch_pdf, path, lambda p: fetch.download_drive("ID", p), kind="paper", name="x")
+        self.assertEqual(open(path, "rb").read(), CUT_PDF, "the only copy is still there")
+        self.assertEqual((rec["downloaded"], rec["read"]), (True, "unreadable"))
+        self.assertIn("HTTP Error 500", rec["error"])
+        self.assertEqual([f for f in os.listdir(self.d) if f != "old.pdf" and not f.endswith(".txt")], [])
+
+    def test_damaged_file_is_replaced_and_backup_removed(self):
+        path = os.path.join(self.d, "old.pdf")
+        open(path, "wb").write(CUT_PDF)
+        with mock.patch.object(fetch, "pdf_text", side_effect=fake_pdf_text):
+            rec, _ = quiet(fetch.fetch_pdf, path, lambda p: open(p, "wb").write(GOOD_PDF) or True, kind="paper", name="x")
+        self.assertEqual(rec["read"], "text")
+        self.assertEqual(sorted(os.listdir(self.d)), ["old.pdf", "old.txt"])
+
+    # 2. a valid PDF with padding after %%EOF is not called cut off
+    def test_padding_after_eof_is_complete(self):
+        self.assertTrue(fetch.complete_pdf(GOOD_PDF + b"\0" * 20000))
+        self.assertFalse(fetch.complete_pdf(CUT_PDF))
+        self.assertTrue(fetch.complete_pdf(b"<html>not a pdf</html>"), "web pages are judged elsewhere")
+
+    # 3. an unreadable syllabus is not reported as read
+    def test_unreadable_syllabus_is_not_read(self):
+        D = os.path.join(self.d, "subj")
+        os.makedirs(D, exist_ok=True)
+        common = '<a href="https://drive.google.com/file/d/COMMONCOMMONCOMMONCOMMON1/view">'
+        pages = {"https://syllabus.ktunotes.live/pcxxt509": "<title>PCXXT509 syllabus</title>" + common
+                 + '<a href="https://drive.google.com/file/d/SYLLABUSSYLLABUSSYLLABUS1/view">',
+                 "https://syllabus.ktunotes.live/": "<title>KTU Syllabus</title>" + common}
+        with mock.patch.object(fetch, "get", side_effect=lambda u, **k: pages[u]), \
+                mock.patch.object(fetch, "download_drive", side_effect=lambda i, p: open(p, "wb").write(CUT_PDF) or True), \
+                mock.patch.object(fetch, "pdf_text", side_effect=fake_pdf_text):
+            fetch._common_ids.cache_clear()
+            got, _ = quiet(fetch.cmd_syllabus, "PCXXT509", D)
+            fetch._common_ids.cache_clear()
+        self.assertIs(got, False)
+        self.assertFalse(os.path.exists(os.path.join(D, "syllabus", "MODULES.md")))
+        self.assertEqual(fetch.source_state("syllabus", got, "syllabus.ktunotes.live"),
+                         f"found, but the PDF could not be read after {fetch.TRIES} tries")
+        self.assertEqual(fetch.source_state("model", None, "model.ktunotes.live"), "not found on model.ktunotes.live")
+
+    # 4. messages state the real number of tries
+    def test_messages_state_the_real_number_of_tries(self):
+        e403 = urllib.error.HTTPError("https://syllabus.ktunotes.live/x", 403, "Forbidden", {}, None)
+        self.assertEqual(fetch.page_error(e403), "page not fetched (HTTP Error 403: Forbidden)")
+        self.assertEqual(fetch.page_error(TimeoutError("timed out")), f"page not fetched after {fetch.TRIES} tries (timed out)")
+        rec = {"downloaded": False, "attempts": 1, "error": "HTTP Error 404: Not Found"}
+        self.assertEqual(fetch.tries_note(rec), "DOWNLOAD FAILED after 1 try (HTTP Error 404: Not Found)")
+
+    # 5. a page cut off before its Content-Length is retried
+    def test_short_body_is_retried(self):
+        class Short(Resp):
+            def __init__(self, data, length):
+                super().__init__(data)
+                self.headers = {"Content-Length": str(length)}
+        whole = b"<html><title>whole page</title></html>"
+        replies = iter([Short(whole[:16], len(whole)), Short(whole, len(whole))])
+        with mock.patch.object(fetch._OPENER, "open", side_effect=lambda req, timeout=None: next(replies)) as op:
+            self.assertEqual(fetch.get("https://syllabus.ktunotes.live/x"), "<html><title>whole page</title></html>")
+        self.assertEqual(op.call_count, 2)
+
+    # 6. a failure that will never succeed is not retried, and no rerun is suggested for it
+    def test_private_drive_file_is_not_retried(self):
+        with mock.patch.object(fetch, "get", return_value=b"<html>Sign in to Google Drive</html>") as g:
+            rec, _ = quiet(fetch.fetch_pdf, os.path.join(self.d, "p.pdf"), lambda p: fetch.download_drive("ID", p),
+                           kind="paper", name="May 2022")
+        self.assertEqual((g.call_count, rec["attempts"], rec["permanent"]), (2, 1, True))
+        self.assertEqual(fetch.tries_note(rec), "DOWNLOAD FAILED after 1 try (Drive answered with a web page "
+                                                "(private file, or it needs confirmation))")
+
+    def test_report_suggests_rerun_only_for_temporary_failures(self):
+        D = U.new_subject("permfail")
+        recs = [{"kind": "paper", "name": "May 2022", "file": "pyq/x.pdf", "downloaded": False, "read": "not downloaded",
+                 "status": "DOWNLOAD FAILED", "attempts": 1, "error": "HTTP Error 404: Not Found", "permanent": True}]
+        json.dump({"tries": 3, "available_papers": 1, "selected_papers": 1, "records": recs},
+                  open(os.path.join(D, "materials.json"), "w"))
+        rep = "\n".join(predict.materials_report(D))
+        self.assertIn("May 2022: download failed after 1 try (HTTP Error 404: Not Found)", rep)
+        self.assertIn("1 failed;", rep)
+        self.assertNotIn("rerun prepare", rep)
+
+    # 7. pages already rendered from the same PDF are not rendered again
+    def test_pages_are_not_rendered_twice(self):
+        path = os.path.join(self.d, "p.pdf")
+        open(path, "wb").write(GOOD_PDF)
+        img = os.path.join(self.d, "img")
+        runs = []
+
+        def run(cmd, **k):
+            runs.append(cmd[0])
+            open(cmd[-1] + "-1.jpg", "wb").write(b"jpg")
+        with mock.patch.object(fetch, "pdf_text", side_effect=fake_pdf_text), \
+                mock.patch.object(fetch.shutil, "which", return_value="/usr/bin/tool"), \
+                mock.patch.object(fetch.subprocess, "run", side_effect=run):
+            fetch.to_text(path, img, pages=True)
+            fetch.to_text(path, img, pages=True)
+            os.utime(path, (os.path.getmtime(path) + 10,) * 2)           # a newer download: render again
+            fetch.to_text(path, img, pages=True)
+        self.assertEqual(runs, ["pdftoppm", "pdftoppm"])
+
+    # 8. prepare prints the report once
+    def test_prepare_prints_the_report_once(self):
+        D = U.new_subject("once", papers=[(f"P{i}", U.paper_text()) for i in range(3)])
+        with mock.patch.object(sys, "argv", ["ktu.py", "prepare", "PCXXT501"]), \
+                mock.patch.object(ktu.fetch, "cmd_setup", return_value=D), \
+                mock.patch.object(ktu, "topics_page", return_value=None):
+            _, out = quiet(ktu.main)
+        self.assertEqual(out.count("Materials report ("), 1, out)
+        with mock.patch.object(sys, "argv", ["ktu.py", "predict", D]):
+            _, out = quiet(ktu.main)
+        self.assertEqual(out.count("Materials report ("), 1, "ktu.py predict shows it once")
+
+
 if __name__ == "__main__":
     unittest.main()
