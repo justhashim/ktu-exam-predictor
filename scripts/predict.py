@@ -624,6 +624,45 @@ def b_pairs(paper_qs):
     return [(n, n + 1) for n in nums if (n - nums[0]) % 2 == 0]
 
 
+def part_b_depth(qs, order, topics):
+    """{module: {"median": n, "papers": k}}: how many of a module's topics (from the top of its part of `order`)
+    past papers needed to answer one Part B question in full. A 9-mark question pairs two parts, usually from two
+    topics, so a top topic only pays off when its partner is studied too (DAA and CN, Nov 2026). Per paper and pair
+    of options: an option's need is the deepest module position of its tags (tags not in the order are ignored; an
+    option with none left is skipped); the pair's need is the easier option's, attributed to the most common module
+    among that option's tags."""
+    pos, count = {}, {}
+    for t in order:
+        m = topics[t]["module"]
+        count[m] = count.get(m, 0) + 1
+        pos[t] = count[m]
+    by_paper = {}
+    for q in qs:
+        if q.get("part") == "B" and re.match(r"B\d+", q["q"]):
+            by_paper.setdefault(q["paper"], []).append(q)
+    need, papers = {}, {}
+    for pi, pq in by_paper.items():
+        opts = {}
+        for q in pq:
+            opts.setdefault(int(re.match(r"B(\d+)", q["q"]).group(1)), []).append(q)
+        for a, b in b_pairs(pq):
+            best = None
+            for n in (a, b):
+                ts = [t for q in opts.get(n, []) for t in q.get("topics", []) if t in pos]
+                if not ts:
+                    continue
+                mods = {}
+                for t in ts:
+                    mods[topics[t]["module"]] = mods.get(topics[t]["module"], 0) + 1
+                cand = (max(pos[t] for t in ts), max(mods, key=mods.get))
+                if best is None or cand[0] < best[0]:
+                    best = cand
+            if best:
+                need.setdefault(best[1], []).append(best[0])
+                papers.setdefault(best[1], set()).add(pi)
+    return {m: {"median": int(statistics.median(v) + 0.5), "papers": len(papers[m])} for m, v in sorted(need.items())}
+
+
 def attainable(paper_qs, ok):
     """Share of marks writable if exactly the questions with ok(q) were prepared (Part B: better option per pair)."""
     def total(f):
@@ -832,7 +871,8 @@ def main():
                        **({"covers": topics[t]["covers"]} if topics[t].get("covers") else {})}
                       for i, t in enumerate(order)],
            "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper,
-           "warnings": warnings, "materials": materials(D, cfg, papers), "materials_report": materials_report(D)}
+           "warnings": warnings, "materials": materials(D, cfg, papers), "materials_report": materials_report(D),
+           "part_b_depth": part_b_depth(qs, order, topics)}
     json.dump(out, open(os.path.join(D, "results.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     write_markdown(out, cfg, os.path.join(D, "FORECAST.md"))
     report(out)
@@ -885,6 +925,7 @@ def write_markdown(o, cfg, path):
         L.append(f"| {t['rank']} | {M(t['name'])} | {M(t.get('family', ''))} | {M(', '.join(t.get('covers', [])), 120)} | "
                  f"M{t['module']} | {t['p']:.2f} | {t['p_history']:.2f} | {t['p_notes']:.2f} | "
                  f"{M(', '.join(t['notes']) or (('within ' + ', '.join(t['notes_parent'])) if t.get('notes_parent') else 'not in notes'))} | {t['asked']} |")
+    L += depth_lines(o.get("part_b_depth", {}), heading=True)
     if o["questions"]:
         L += ["", f"## Questions most likely to be reused (about {o['expected_repeats']:.1f} of the paper's questions expected to repeat)", "",
               "| P | Question (latest wording) | Module | Asked in |", "|---|---|---|---|"]
@@ -905,6 +946,17 @@ def write_markdown(o, cfg, path):
     open(path, "w", encoding="utf-8").write("\n".join(L) + "\n")
 
 
+def depth_lines(depth, heading=False):
+    """The Part B depth line per module (see part_b_depth); [] when no past paper had Part B questions."""
+    if not depth:
+        return []
+    out = ["", "### How deep to go in each module (Part B)", ""] if heading else []
+    for m, d in sorted(depth.items(), key=lambda x: int(x[0])):
+        out.append(f"- Module {m}: in {d['papers']} past paper{'s' if d['papers'] != 1 else ''}, answering one Part B "
+                   f"question in full needed the module's top {d['median']} topic{'s' if d['median'] != 1 else ''} (median).")
+    return out
+
+
 def report(o):
     print(f"{o['subject'].get('name')} ({o['subject'].get('code')}): {o['n_questions']} questions, "
           f"{len(o['papers'])} papers, {o['n_families']} question families")
@@ -919,6 +971,8 @@ def report(o):
         print(f"holdout {h['paper']} ({h['n_topics']} topics): " + " | ".join(f"{n}: 40% {c['40%']:.0%} 60% {c['60%']:.0%}" for n, c in h["curves"].items()))
     for w in o.get("warnings", []):
         print("WARNING:", w)
+    for line in depth_lines(o.get("part_b_depth", {})):
+        print(line[2:])
     print(f"\nFORECAST {o['target']['label']}  (alpha history {o['alpha_history']:.2f})")
     for t in o["topics"][:20]:
         print(f"  {t['rank']:2d}. M{t['module']} {t['p']:.2f} (hist {t['p_history']:.2f} notes {t['p_notes']:.2f})  {t['name']}")

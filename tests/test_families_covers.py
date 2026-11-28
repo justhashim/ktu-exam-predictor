@@ -169,5 +169,34 @@ class TestFamiliesEndToEnd(unittest.TestCase):
         self.assertNotIn("](https", F); self.assertNotIn("<b>", F)
 
 
+class TestPartBDepth(unittest.TestCase):
+    def test_median_of_the_easier_option(self):
+        topics = dict({k: {"module": 3} for k in ("K", "M", "D", "F")}, OFF_SYLLABUS={"module": 0})
+        order = ["K", "M", "F", "D"]                       # module-3 positions: K1 M2 F3 D4
+        qs = [  # paper 0: Q13 = K + D (need 4), Q14 = M + F (need 3) -> 3; paper 1: Q13 = K (1), Q14 = D (4) -> 1
+                # paper 2: Q13 = OFF + M (need 2: OFF ignored), Q14 = OFF only (skipped) -> 2
+            *[{"q": q, "topics": t, "paper": 0, "part": "B"}
+              for q, t in (("B13a", ["K"]), ("B13b", ["D"]), ("B14a", ["M"]), ("B14b", ["F"]))],
+            *[{"q": q, "topics": t, "paper": 1, "part": "B"} for q, t in (("B13", ["K"]), ("B14", ["D"]))],
+            *[{"q": q, "topics": t, "paper": 2, "part": "B"}
+              for q, t in (("B13a", ["OFF_SYLLABUS"]), ("B13b", ["M"]), ("B14", ["OFF_SYLLABUS"]))]]
+        self.assertEqual(predict.part_b_depth(qs, order, topics), {3: {"median": 2, "papers": 3}})
+
+    def test_no_part_b_gives_nothing(self):
+        self.assertEqual(predict.part_b_depth([], ["K"], {"K": {"module": 1}}), {})
+        self.assertEqual(predict.part_b_depth([{"q": "A1", "topics": ["K"], "paper": 0, "part": "A"}], ["K"],
+                                              {"K": {"module": 1}}), {})
+
+    def test_forecast_shows_the_depth_line(self):
+        _, F = TestFamiliesEndToEnd.run_predict(self)
+        self.assertIn("answering one Part B question in full needed the module's top", F)
+
+    @classmethod
+    def setUpClass(cls):
+        if not hasattr(TestFamiliesEndToEnd, "D"):
+            TestFamiliesEndToEnd.setUpClass()
+        cls.D = TestFamiliesEndToEnd.D
+
+
 if __name__ == "__main__":
     unittest.main()
