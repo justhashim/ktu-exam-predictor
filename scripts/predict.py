@@ -548,8 +548,70 @@ def order_global(adj):
     return sorted(adj, key=lambda t: -adj[t]["p"])
 
 
-def order_balanced(adj, topics, modules):
-    per = {m: sorted([t for t in adj if topics[t]["module"] == m], key=lambda t: -adj[t]["p"]) for m in modules}
+GENERIC_PREFIX = re.compile(r"(?i)^(?:(?:module|unit|part|chapter|section)\s*[\w.]*|m\d+)$")
+FAMILY_PREFIX_MAX = 6       # more topics than this sharing a "Name:" prefix is a heading over a module, not a family
+
+
+def topic_families(topics):
+    """{topic key: family label}. Parts of one topic are ranked and taught together (DAA Nov 2026: recurrences
+    split into four topics each looked minor, yet carried all of Module 1 Part B). First match wins: a hand-set
+    "family" field; a split topic's parent ("parent", or "split" for the parent itself); 2 to FAMILY_PREFIX_MAX
+    topics of one module sharing a "Name:" prefix that isn't generic ("Module 1: ..."); otherwise the topic's own
+    key. A family is always within one module: a label used in several modules gets " (Mn)" added."""
+    prefixes = {}
+    for k, t in topics.items():
+        name = str(t.get("name", ""))
+        p = name.split(":", 1)[0].strip() if ":" in name else ""
+        if p and not GENERIC_PREFIX.match(p):
+            prefixes.setdefault((t.get("module"), p.lower()), []).append((k, p))
+    by_prefix = {k: p for ks in prefixes.values() if 2 <= len(ks) <= FAMILY_PREFIX_MAX for k, p in ks}
+    base = {}
+    for k, t in topics.items():
+        if t.get("family"):
+            base[k] = str(t["family"])
+        elif t.get("parent") in topics:
+            base[k] = str(topics[t["parent"]].get("name", t["parent"]))
+        elif t.get("split"):
+            base[k] = str(t.get("name", k))
+        elif k in by_prefix:
+            base[k] = by_prefix[k]
+    mods = {}
+    for k, label in base.items():
+        mods.setdefault(label, set()).add(topics[k].get("module"))
+    out = {k: k for k in topics}
+    for k, label in base.items():
+        out[k] = f"{label} (M{topics[k].get('module')})" if len(mods[label]) > 1 else label
+    return out
+
+
+def family_score(ps):
+    """The chance at least one member of a family is asked: 1 - prod(1 - p)."""
+    q = 1.0
+    for p in ps:
+        q *= 1 - p
+    return 1 - q
+
+
+def use_families(cfg):
+    """subject.json "family_order": rank topic families as one unit (default on)."""
+    return bool(cfg.get("family_order", True))
+
+
+def order_balanced(adj, topics, modules, families=None):
+    """Module-balanced study order: each module's topics by p, modules interleaved round by round. With families
+    ({topic: label}, see topic_families), each module's families are ranked by family_score and each family's
+    members follow one another, highest p first."""
+    per = {}
+    for m in modules:
+        ts = [t for t in adj if topics[t]["module"] == m]
+        if families:
+            groups = {}
+            for t in ts:
+                groups.setdefault(families.get(t, t), []).append(t)
+            ranked = sorted(groups.values(), key=lambda g: -family_score([adj[t]["p"] for t in g]))
+            per[m] = [t for g in ranked for t in sorted(g, key=lambda t: -adj[t]["p"])]
+        else:
+            per[m] = sorted(ts, key=lambda t: -adj[t]["p"])
     out = []
     for r in range(max((len(v) for v in per.values()), default=0)):
         out += sorted([v[r] for v in per.values() if r < len(v)], key=lambda t: -adj[t]["p"])
@@ -594,10 +656,11 @@ def holdout(cfg, papers, topics, qs, X, C, types, keys, h, modules):
     p_hist = history_probs(X, C, types, h, types[h], keys)
     prior = notes_prior(topics, expected_topics(cfg, papers, qs, h))
     alpha = cfg.get("alpha_history", 0.25)
+    fam = topic_families(topics) if use_families(cfg) else None
     variants = {
-        "history only": order_balanced(topic_forecast(p_hist, topics, prior, 1.0), topics, modules),
-        "notes only": order_balanced(topic_forecast(p_hist, topics, prior, 0.0), topics, modules),
-        f"blend a={alpha}": order_balanced(topic_forecast(p_hist, topics, prior, alpha), topics, modules),
+        "history only": order_balanced(topic_forecast(p_hist, topics, prior, 1.0), topics, modules, fam),
+        "notes only": order_balanced(topic_forecast(p_hist, topics, prior, 0.0), topics, modules, fam),
+        f"blend a={alpha}": order_balanced(topic_forecast(p_hist, topics, prior, alpha), topics, modules, fam),
     }
     n, eff = len(topics), effort_map(topics)
     out = {"paper": papers[h]["label"], "n_topics": n, "curves": {}}
@@ -652,7 +715,11 @@ def main():
     p_hist = history_probs(X, C, types, P, target["type"], keys)
     prior = notes_prior(topics, expected_topics(cfg, papers, qs, P))
     adj = topic_forecast(p_hist, topics, prior, cfg.get("alpha_history", 0.25))
-    order = order_balanced(adj, topics, modules)
+    families = topic_families(topics)
+    order = order_balanced(adj, topics, modules, families if use_families(cfg) else None)
+    fam_size = {}
+    for f in families.values():
+        fam_size[f] = fam_size.get(f, 0) + 1
 
     boost = cfg.get("course_boost", 3.0)
     fam_mem = {}
@@ -760,7 +827,9 @@ def main():
            "behaviour": behaviour, "backtest": bt_curve, "holdout": holdouts,
            "topics": [{"rank": i + 1, "key": t, "name": topics[t]["name"], "module": topics[t]["module"],
                        "notes": topics[t].get("notes", []), "notes_parent": topics[t].get("notes_parent", []),
-                       "parent": topics[t].get("parent"), "asked": int(sum(r[keys.index(t)] for r in X)) if P else 0, **adj[t]}
+                       "parent": topics[t].get("parent"), "asked": int(sum(r[keys.index(t)] for r in X)) if P else 0, **adj[t],
+                       **({"family": families[t]} if fam_size[families[t]] > 1 else {}),
+                       **({"covers": topics[t]["covers"]} if topics[t].get("covers") else {})}
                       for i, t in enumerate(order)],
            "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper,
            "warnings": warnings, "materials": materials(D, cfg, papers), "materials_report": materials_report(D)}
@@ -808,10 +877,13 @@ def write_markdown(o, cfg, path):
         for K in ("30%", "40%", "50%", "60%", "70%"):
             L.append(f"| {K} | " + " | ".join(f"{c[K]:.0%}" for c in h["curves"].values()) + " |")
         L.append("")
-    L += ["## Study order (module-balanced)", "", "| # | Topic | Module | P(asked) | history | notes | Notes pages | Times asked |",
-          "|---|---|---|---|---|---|---|---|"]
+    L += ["## Study order (module-balanced)", "",
+          "Topics in one family (parts of one subject) are ranked together; study every section a topic covers.", "",
+          "| # | Topic | Family | Covers | Module | P(asked) | history | notes | Notes pages | Times asked |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for t in o["topics"]:
-        L.append(f"| {t['rank']} | {M(t['name'])} | M{t['module']} | {t['p']:.2f} | {t['p_history']:.2f} | {t['p_notes']:.2f} | "
+        L.append(f"| {t['rank']} | {M(t['name'])} | {M(t.get('family', ''))} | {M(', '.join(t.get('covers', [])), 120)} | "
+                 f"M{t['module']} | {t['p']:.2f} | {t['p_history']:.2f} | {t['p_notes']:.2f} | "
                  f"{M(', '.join(t['notes']) or (('within ' + ', '.join(t['notes_parent'])) if t.get('notes_parent') else 'not in notes'))} | {t['asked']} |")
     if o["questions"]:
         L += ["", f"## Questions most likely to be reused (about {o['expected_repeats']:.1f} of the paper's questions expected to repeat)", "",
