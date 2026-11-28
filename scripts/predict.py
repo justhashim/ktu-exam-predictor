@@ -118,6 +118,130 @@ def materials_line(m):
             f"notes {m['notes_pdfs']} PDFs; past papers {papers}; model paper {model}.")
 
 
+def garbled(p):
+    """A draft that failed the marks check AND looks garbled would only add noise: load() leaves it out."""
+    nA = sum(1 for q in p.get("questions", []) if q["q"].startswith("A"))
+    return str(p.get("extract_status", "ok")).startswith("review") and (len(p.get("questions", [])) < 12 or nA < 4)
+
+
+def used_in_forecast(p):
+    """True if load() uses this paper: it has questions, isn't a duplicate and doesn't look garbled."""
+    return bool(p.get("questions")) and not p.get("duplicate_of") and not garbled(p)
+
+
+def materials_report(D):
+    """What was found, downloaded, read and used, for the student, before the forecast. Download and read
+    outcomes come from materials.json (written by `prepare`); what was used comes from papers.json, by the same
+    rules load() applies. Each paper left out is named with the reason, and the fixes are listed."""
+    cfg = json.load(open(os.path.join(D, "subject.json"), encoding="utf-8"))
+    mj, pj = os.path.join(D, "materials.json"), os.path.join(D, "papers.json")
+    man = json.load(open(mj, encoding="utf-8")) if os.path.exists(mj) else None
+    P = json.load(open(pj, encoding="utf-8"))["papers"] if os.path.exists(pj) else []
+    tries = man.get("tries", 3) if man else 3
+    recs = man.get("records", []) if man else []
+    by_src = {r.get("source"): r for r in recs if r.get("source")}
+    labels = {p["id"]: p.get("label", p["id"]) for p in P}
+
+    def course_tag(label, c):
+        return f" {c}" if c and c != cfg.get("code") and c not in label else ""
+
+    def n(k, word):
+        return f"{k} {word}" + ("" if k == 1 else "s")
+
+    L, missed, fixes = [f"Materials report (each download is tried up to {tries} times):"], [], []
+    if man:
+        paper_recs = [r for r in recs if r["kind"] == "paper"]
+        got = [r for r in paper_recs if r["downloaded"]]
+        retried = [r for r in got if r["attempts"] > 1]
+        failed = [r for r in paper_recs if not r["downloaded"]]
+        reads = {k: sum(1 for r in got if r["read"] == k) for k in ("text", "scan", "unreadable", "no tool")}
+        L.append(f"- Past papers: {man.get('selected_papers', len(paper_recs))} selected of "
+                 f"{man.get('available_papers', '?')} available; {len(got)} downloaded"
+                 + (f" ({len(retried)} after a retry)" if retried else "")
+                 + (f"; {len(failed)} failed after {tries} tries" if failed else "")
+                 + f"; read: {reads['text']} with text, {n(reads['scan'], 'scan')} (images only)"
+                 + (f", {reads['unreadable']} unreadable" if reads["unreadable"] else "")
+                 + (f", {reads['no tool']} not read (no PDF text tool)" if reads["no tool"] else ""))
+        for r in failed:
+            missed.append(f"{r['name']}{course_tag(r['name'], r.get('course'))}: "
+                          f"download failed after {r['attempts']} tries ({r['error']})")
+    else:
+        L.append(f"- Past papers: {sum(1 for p in P if not p.get('model'))} in papers.json "
+                 "(no download record: `ktu.py prepare` writes one)")
+    papers = [p for p in P if not p.get("model")]
+    used = [p for p in papers if used_in_forecast(p)]
+    L.append(f"- Used in the forecast: {n(len(used), 'paper')} ({sum(len(p['questions']) for p in used)} questions)")
+    imgs = os.path.join(D, "pyq", "img")
+    img_files = os.listdir(imgs) if os.path.isdir(imgs) else []
+    for p in papers:
+        if used_in_forecast(p):
+            continue
+        r = by_src.get(p.get("source")) or {}
+        stem = os.path.splitext(os.path.basename(p.get("source") or ""))[0]
+        scan = r.get("read") in ("scan", "photo") or p.get("source") is None or \
+            bool(stem and any(f.startswith(stem + "-") for f in img_files))
+        if p.get("duplicate_of"):
+            why = f"duplicate of {labels.get(p['duplicate_of'], p['duplicate_of'])}"
+        elif p.get("questions"):
+            why = "drafted questions look garbled (fix them in papers.json)"
+        elif r.get("read") == "unreadable":
+            why = f"could not be read after {r.get('attempts', tries)} tries (damaged or cut-off PDF)"
+        elif r.get("read") == "no tool":
+            why = "not read: no PDF text tool installed"
+        elif scan:
+            why = "no questions yet (scan: transcribe it from pyq/img/)"
+        else:
+            why = "no questions drafted (see pyq/EXTRACTION.md)"
+        label = p.get("label", p.get("id", "?"))
+        missed.append(f"{label}{course_tag(label, p.get('course'))}: {why}")
+    if missed:
+        L.append("- Not used:")
+        L += [f"  - {m}" for m in missed]
+    model = [p for p in P if p.get("model")]
+    if model and model[0].get("questions"):
+        L.append(f"- Model paper: {len(model[0]['questions'])} questions used")
+    elif model:
+        L.append("- Model paper: found, no questions yet (scan: transcribe it from model/img/)")
+    else:
+        L.append(f"- Model paper: {(man or {}).get('model', 'none')}")
+    if man:
+        nr = [r for r in recs if r["kind"] == "notes"]
+        ok = [r for r in nr if r["downloaded"]]
+        retried = [r for r in ok if r["attempts"] > 1]
+        scans = [r for r in ok if r["read"] == "scan"]
+        L.append(f"- Notes: {len(nr)} PDFs found, {len(ok)} downloaded" + (f" ({len(retried)} after a retry)" if retried else "")
+                 + f", {sum(1 for r in ok if r['read'] == 'text')} with text (used for topics and ranking)"
+                 + (f", {n(len(scans), 'scan')} (not used until read from notes/img/)" if scans else ""))
+        for r in nr:
+            if not r["downloaded"]:
+                L.append(f"  - not used: {r['name']}: download failed after {r['attempts']} tries ({r['error']})")
+            elif r["read"] in ("unreadable", "no tool"):
+                L.append(f"  - not used: {r['name']}: " + (f"could not be read after {r['attempts']} tries"
+                                                           if r["read"] == "unreadable" else "no PDF text tool installed"))
+    else:
+        nd = os.path.join(D, "notes")
+        pdfs = [f for f in os.listdir(nd) if f.lower().endswith(".pdf")] if os.path.isdir(nd) else []
+        L.append(f"- Notes: {len(pdfs)} PDFs, {sum(1 for f in pdfs if os.path.exists(os.path.join(nd, f[:-4] + '.txt')))} with text")
+    sd = os.path.join(D, "syllabus")
+    has_syl = os.path.isdir(sd) and any(f.lower().endswith(".pdf") for f in os.listdir(sd))
+    L.append(f"- Syllabus: {(man or {}).get('syllabus') or ('downloaded' if has_syl else 'not found')}")
+    own = [r for r in recs if r["kind"].startswith("own")]
+    if own:
+        L.append(f"- Own files: {n(sum(1 for r in own if r['kind'] == 'own notes'), 'notes file')}, "
+                 f"{n(sum(1 for r in own if r['kind'] == 'own paper'), 'paper')}")
+    slow = [r for r in recs if r["downloaded"] and r["attempts"] > 1]
+    if slow:
+        L.append("- Needed more than one try: " + ", ".join(f"{r['name']} ({r['attempts']} tries)" for r in slow))
+    if any(not r["downloaded"] or r["read"] == "unreadable" for r in recs) or \
+            any("failed" in str((man or {}).get(k, "")) for k in ("syllabus", "model")):
+        fixes.append("rerun prepare: it tries the failed and damaged files again and keeps everything already read")
+    if any("scan:" in m for m in missed) or (model and not model[0].get("questions")):
+        fixes.append("transcribe the scanned papers (step 3) so they count")
+    if fixes:
+        L.append("- To get what was missed: " + "; ".join(fixes))
+    return [safety.scrub(x) for x in L]
+
+
 def load(d):
     cfg = json.load(open(os.path.join(d, "subject.json"), encoding="utf-8"))
     topics = json.load(open(os.path.join(d, "topics.json"), encoding="utf-8"))["topics"]
@@ -128,9 +252,9 @@ def load(d):
     papers = [p for p in papers if p.get("questions") and not p.get("duplicate_of")]   # skip empty / duplicate papers
     SKIPPED.clear()
     keep = []
-    for p in papers:     # a draft that failed the marks check AND looks garbled would only add noise
-        nA = sum(1 for q in p["questions"] if q["q"].startswith("A"))
-        if str(p.get("extract_status", "ok")).startswith("review") and (len(p["questions"]) < 12 or nA < 4):
+    for p in papers:
+        if garbled(p):
+            nA = sum(1 for q in p["questions"] if q["q"].startswith("A"))
             SKIPPED.append(f"{p['label']} ({len(p['questions'])} questions, {nA} in Part A)")
         else:
             keep.append(p)
@@ -589,7 +713,7 @@ def main():
                        "parent": topics[t].get("parent"), "asked": int(sum(r[keys.index(t)] for r in X)) if P else 0, **adj[t]}
                       for i, t in enumerate(order)],
            "questions": fam_out, "expected_repeats": float(sum(x["p"] for x in fam_out)), "reuse_rate": reuse, "paper": paper,
-           "warnings": warnings, "materials": materials(D, cfg, papers)}
+           "warnings": warnings, "materials": materials(D, cfg, papers), "materials_report": materials_report(D)}
     json.dump(out, open(os.path.join(D, "results.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     write_markdown(out, cfg, os.path.join(D, "FORECAST.md"))
     report(out)
@@ -610,6 +734,14 @@ def write_markdown(o, cfg, path):
          "Study order is module-balanced. Notes pages refer to the PDFs in `notes/`. "
          "Coverage tables use the share of the syllabus studied (by notes pages), so subjects with few or many "
          "topics compare fairly.", ""]
+    if o.get("materials_report"):         # what was found, downloaded, read and used: tell the student first
+        head = re.sub(r"^Materials report \((.)(.*)\):$", lambda m: m.group(1).upper() + m.group(2) + ".",
+                      o["materials_report"][0])
+        L += ["## Materials report", "", M(head), ""]
+        for line in o["materials_report"][1:]:
+            lead = re.match(r"\s*-\s*", line).group(0) if re.match(r"\s*-\s*", line) else ""
+            L.append(lead.rstrip() + " " + M(line[len(lead):]) if lead else M(line))
+        L.append("")
     if o.get("warnings"):
         L += ["> [!WARNING]"] + [f"> {M(w)}" for w in o["warnings"]] + [""]
     if o["backtest"]:
@@ -656,6 +788,7 @@ def report(o):
           f"{len(o['papers'])} papers, {o['n_families']} question families")
     if o.get("materials"):
         print(materials_line(o["materials"]))
+    print("\n".join(o.get("materials_report", [])))
     for r in o["behaviour"]["per_paper"]:
         print(f"  {r['paper']:9s} {r['course']:9s} ({r['type'][:4]})  {r['repeats']:2d}/{r['questions']} reused ({r['rate']:.0%})")
     if o["backtest"]:

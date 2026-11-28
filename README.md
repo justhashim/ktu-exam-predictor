@@ -114,6 +114,7 @@ I have the supply exam for computer networks next month, what will come?
 ```
 
 You get a file called `FORECAST.md` with:
+- **a materials report:** how many papers and notes were found, downloaded and read, how many went into the forecast, and why each one left out was skipped (each download is tried up to 3 times). The agent tells you this before the forecast.
 - **the study order,** module by module
 - **the questions most likely to come back,** with every past wording
 - **a sample paper** put together from likely questions (a guess, clearly labelled)
@@ -318,8 +319,9 @@ The code needs Python 3.8+ and the standard library only. Optional: `pdftotext`/
     ├── topics.json      key -> {name, module, source, notes pages, weight_hint, model, syllabus_items}
     ├── papers.json      papers[] -> {id, label, type, course, scheme, model, questions[]}
     │                    question: {q: "A1" | "B11a", marks, topics: [keys], text}
+    ├── materials.json   every file prepare tried: downloaded or not, tries, text or scan, why it failed
     ├── results.json     everything in FORECAST.md, machine-readable
-    ├── FORECAST.md      the forecast, with a "Materials used" line
+    ├── FORECAST.md      the forecast, starting with a "Materials used" line and the materials report
     ├── syllabus/        PDF, text, MODULES.md
     ├── model/           model question paper (img/ for scans)
     ├── notes/           notes PDFs, text, OUTLINE.txt

@@ -719,6 +719,7 @@ def status(D, quiet=False):
          f"{len(off)} judged outside the current syllabus)",
          f"  topics: {sum(srcs.values())} (" + ", ".join(f"{n} {k}" for k, n in srcs.items()) + ")",
          f"  forecast: {'FORECAST.md' if os.path.exists(os.path.join(D, 'FORECAST.md')) else 'not yet'}"]
+    L += ["  " + x for x in predict.materials_report(D)]
     todo = []
     if unread and not text_tool():
         todo.append(f"{len(unread)} PDFs could not be read: install poppler-utils (Linux: apt/dnf install poppler-utils; "
@@ -799,6 +800,9 @@ def main():
             print("WARNING:", w)
         made = split_topics(D)
         print(f"== 4/5 auto-tagged {n} questions ({low} low-confidence); split coarse topics into {made} subtopics")
+        import predict                                  # noqa: E402
+        print("\n== MATERIALS REPORT (tell the student this before the forecast)")
+        print("\n".join(predict.materials_report(D)) + "\n")
         print("== 5/5 forecast")
         print(run("predict.py", D, *pargs).stdout[-2500:])
         print("\n".join(status(D, quiet=True)))
