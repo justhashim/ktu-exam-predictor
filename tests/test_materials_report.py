@@ -201,6 +201,19 @@ class TestSetupManifest(unittest.TestCase):
         self.assertIn("Syllabus: not found", rep)
         self.assertIn("rerun prepare", rep)
 
+    def test_notes_kept_from_an_earlier_run_are_counted(self):
+        nd = os.path.join(self.D, "notes")
+        open(os.path.join(nd, "OLD Problems.pdf"), "wb").write(GOOD_PDF)       # downloaded by an earlier prepare
+        open(os.path.join(nd, "OLD Problems.txt"), "w").write("x" * 4000)
+        try:
+            rep = "\n".join(predict.materials_report(self.D))
+        finally:
+            os.remove(os.path.join(nd, "OLD Problems.pdf"))
+            os.remove(os.path.join(nd, "OLD Problems.txt"))
+        self.assertIn("Notes: 2 PDFs found, 2 downloaded, 2 with text", rep)
+        self.assertIn("plus 1 kept from an earlier run (OLD Problems.pdf)", rep)
+        self.assertIn("3 used for topics and ranking", rep)
+
     def test_report_works_without_a_manifest(self):
         D = U.new_subject("nomanifest", papers=[("P0", U.paper_text())])
         rep = "\n".join(predict.materials_report(D))
@@ -231,6 +244,8 @@ class TestUsedInForecast(unittest.TestCase):
         self.assertIn("Dec 2022: duplicate of Nov 2021", rep)
         self.assertIn("May 2023: drafted questions look garbled", rep)
         self.assertIn("Model paper: 5 questions used", rep)
+        _, out = quiet(ktu.status, D)                  # status's "Materials used" line agrees with the report
+        self.assertIn("past papers 1 PCXXT501;", out)
 
 
 class TestReportBeforeForecast(unittest.TestCase):

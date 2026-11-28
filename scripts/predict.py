@@ -204,14 +204,21 @@ def materials_report(D):
         L.append("- Model paper: found, no questions yet (scan: transcribe it from model/img/)")
     else:
         L.append(f"- Model paper: {(man or {}).get('model', 'none')}")
+    nd = os.path.join(D, "notes")
+    on_disk = sorted(f for f in os.listdir(nd) if f.lower().endswith(".pdf")) if os.path.isdir(nd) else []
+    with_text = [f for f in on_disk if os.path.exists(os.path.join(nd, f[:-4] + ".txt"))]   # what notes_pages() reads
     if man:
         nr = [r for r in recs if r["kind"] == "notes"]
         ok = [r for r in nr if r["downloaded"]]
         retried = [r for r in ok if r["attempts"] > 1]
         scans = [r for r in ok if r["read"] == "scan"]
+        this_run = {os.path.basename(r["file"]) for r in recs if r["kind"] in ("notes", "own notes")}
+        kept = [f for f in on_disk if f not in this_run]       # downloaded by an earlier prepare, still used
         L.append(f"- Notes: {len(nr)} PDFs found, {len(ok)} downloaded" + (f" ({len(retried)} after a retry)" if retried else "")
-                 + f", {sum(1 for r in ok if r['read'] == 'text')} with text (used for topics and ranking)"
-                 + (f", {n(len(scans), 'scan')} (not used until read from notes/img/)" if scans else ""))
+                 + f", {sum(1 for r in ok if r['read'] == 'text')} with text"
+                 + (f", plus {len(kept)} kept from an earlier run ({', '.join(kept)})" if kept else "")
+                 + f"; {len(with_text)} used for topics and ranking"
+                 + (f"; {n(len(scans), 'scan')} (not used until read from notes/img/)" if scans else ""))
         for r in nr:
             if not r["downloaded"]:
                 L.append(f"  - not used: {r['name']}: download failed after {r['attempts']} tries ({r['error']})")
@@ -219,9 +226,7 @@ def materials_report(D):
                 L.append(f"  - not used: {r['name']}: " + (f"could not be read after {r['attempts']} tries"
                                                            if r["read"] == "unreadable" else "no PDF text tool installed"))
     else:
-        nd = os.path.join(D, "notes")
-        pdfs = [f for f in os.listdir(nd) if f.lower().endswith(".pdf")] if os.path.isdir(nd) else []
-        L.append(f"- Notes: {len(pdfs)} PDFs, {sum(1 for f in pdfs if os.path.exists(os.path.join(nd, f[:-4] + '.txt')))} with text")
+        L.append(f"- Notes: {len(on_disk)} PDFs, {len(with_text)} with text")
     sd = os.path.join(D, "syllabus")
     has_syl = os.path.isdir(sd) and any(f.lower().endswith(".pdf") for f in os.listdir(sd))
     L.append(f"- Syllabus: {(man or {}).get('syllabus') or ('downloaded' if has_syl else 'not found')}")

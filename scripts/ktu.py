@@ -712,7 +712,8 @@ def status(D, quiet=False):
             srcs[t.get("source", "hand-written")] = srcs.get(t.get("source", "hand-written"), 0) + 1
     import predict                                      # noqa: E402  (shared summary of what was used)
     L = [f"{cfg['name']} ({cfg['code']})  ->  {D}",
-         "  " + predict.materials_line(predict.materials(D, cfg, [p for p in used if p.get("course")])),
+         "  " + predict.materials_line(predict.materials(D, cfg, [p for p in used if p.get("course")
+                                                                  and predict.used_in_forecast(p)])),
          f"  papers: {len(used)} with questions ({len(ok)} clean, {len(review)} drafted with problems), "
          f"{len(empty)} without questions, {len(dups)} duplicates skipped",
          f"  questions: {len(qs)} ({sum(1 for q in qs if q.get('auto_tag'))} auto-tagged, {len(lowc)} low-confidence, "
