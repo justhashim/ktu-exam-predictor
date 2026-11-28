@@ -142,6 +142,7 @@ That is four papers, so it's a rough guide. The fixes below still help, most of 
    - Add topics for scanned-notes modules from `notes/img/`.
    - Set `"model": true` for topics in the official model paper (`https://model.ktunotes.live/<code>`).
    - Questions tagged `OFF_SYLLABUS` were judged outside the current syllabus. Move any that belong to a real topic.
+   - Set `"family": "<name>"` on topics that belong together (e.g. the methods of one technique) so they are ranked and taught as one. Topics named "Recurrences: ..." and topics split from one parent are grouped already.
 4. **Low-confidence tags:** fix `topics` on questions with a low `tag_score`.
 5. **Syllabus topics** (no notes): check `syllabus/MODULES.md` against the PDF. A module number in the table can land a few lines off, which puts a heading in the wrong module. Fix `module` in `topics.json`.
 
@@ -151,6 +152,8 @@ With several papers to fix, use parallel subagents if your agent supports them: 
 
 In order of priority:
 1. **The study order, module by module.** Each 2024-scheme module carries the same marks (15 of 60), so cover every module.
+   - Teach every section in a topic's `covers` list (the Covers column), not only the topic's title.
+   - In each module, go at least as deep as `FORECAST.md`'s Part B depth line says: a Part B question pairs two parts, usually from two topics, and only knowing both answers one.
 2. **Every past version of each top topic's questions.** Exact wording rarely repeats; topics and textbook examples do.
 3. **Worked answers for numericals and the notes' own examples.** Compute them where possible.
 4. **The likely paper**, labelled as a guess.

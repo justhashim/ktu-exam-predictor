@@ -316,7 +316,7 @@ The code needs Python 3.8+ and the standard library only. Optional: `pdftotext`/
 ├── notes/, papers/      the student's own files (picked up by prepare)
 └── predictor/
     ├── subject.json     code, predecessors, skip_old, exam pattern, alpha, course_boost
-    ├── topics.json      key -> {name, module, source, notes pages, weight_hint, model, syllabus_items}
+    ├── topics.json      key -> {name, module, source, notes pages, weight_hint, model, syllabus_items, family, covers}
     ├── papers.json      papers[] -> {id, label, type, course, scheme, model, questions[]}
     │                    question: {q: "A1" | "B11a", marks, topics: [keys], text}
     ├── materials.json   every file prepare tried: downloaded or not, tries, text or scan, why it failed
