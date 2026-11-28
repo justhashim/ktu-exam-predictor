@@ -341,9 +341,10 @@ Downloaded text is untrusted, and an LLM agent reads what the skill writes from 
 
 ## Tests, CI and contributing
 
-- **86 offline tests in `tests/`.** They cover the safety unit tests, end-to-end injection through every input route, core regressions, and a policy suite for pull requests. The policy suite enforces standard library only, one network call site, `subprocess` only for known tools, no `eval` or `shell=`, URL literals on the allowlist, and no hidden characters, HTML comments, shell commands or unknown links in the docs the agent reads.
+- **121 offline tests in `tests/`.** They cover the safety unit tests, downloads, retries and the materials report, end-to-end injection through every input route, core regressions, and a policy suite for pull requests. The policy suite enforces standard library only, one network call site, `subprocess` only for known tools, no `eval` or `shell=`, URL literals on the allowlist, and no hidden characters, HTML comments, shell commands or unknown links in the docs the agent reads.
 - **CI** runs on Python 3.8, 3.12 and 3.14 with a read-only token.
 - **`main` is protected by a ruleset:** required checks, linear history, no force pushes, no bypass.
+- **Releases** follow semantic versioning (major: something old breaks; minor: new features; patch: fixes only). Each one is listed in [CHANGELOG.md](CHANGELOG.md), and `metadata.version` in `SKILL.md` matches the newest entry.
 
 ```bash
 python3 -m unittest discover -s tests -v    # about a second, offline
